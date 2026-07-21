@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Java / Maven
+target/
+*.class
+*.log
+
+# Angular / Node
+node_modules/
+dist/
+.angular/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docker
+*.pid
