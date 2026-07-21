@@ -1833,3 +1833,191 @@ Expected result:
 Interview language:
 
 > I committed the local database platform separately before wiring it into Spring Boot, which keeps infrastructure setup and application integration as two clear reviewable steps.
+
+## Step 2.1a: Inspect Local PostgreSQL
+
+### Check Repo And Docker State
+
+```bash
+git status --short
+docker compose ps
+docker info
+```
+
+Why:
+
+- Checks whether there are uncommitted files before inspecting the database.
+- Confirms whether any Compose services are already running.
+- Confirms Docker Desktop and the Docker daemon are available.
+
+Result:
+
+- Docker was running.
+- No Compose services were running.
+- Git showed an untracked `.compose.yaml.swp` editor swap file.
+
+Interview language:
+
+> Before starting infrastructure, I check both source-control state and Docker runtime state so I know what environment I am working in.
+
+### Start PostgreSQL
+
+```bash
+docker compose up -d postgres
+```
+
+Why:
+
+- Starts the PostgreSQL service defined in `compose.yaml`.
+- Runs it in detached mode so the terminal can be used for inspection commands.
+
+Result:
+
+- Docker created the Compose network.
+- Docker created and started the `governance-platform-postgres` container.
+
+Interview language:
+
+> I started only the PostgreSQL service because this checkpoint is about inspecting the database, not running the full application stack.
+
+### Check Service And Database Readiness
+
+```bash
+docker compose ps
+docker compose exec postgres pg_isready -U governance -d governance
+```
+
+Why:
+
+- `docker compose ps` shows whether the container is running and which port is published.
+- `pg_isready` asks PostgreSQL whether it is accepting connections.
+
+Result:
+
+- The container was running on host port `5432`.
+- PostgreSQL reported:
+
+```text
+/var/run/postgresql:5432 - accepting connections
+```
+
+Interview language:
+
+> I verified readiness at the database level, not only at the container level.
+
+### Confirm Current Database And User
+
+```bash
+docker compose exec postgres psql -U governance -d governance -c 'select current_database(), current_user;'
+```
+
+Why:
+
+- Connects to PostgreSQL using the configured local user and database.
+- Runs a small SQL query to prove the connection context.
+
+Result:
+
+```text
+current_database | current_user
+------------------+--------------
+governance        | governance
+```
+
+Interview language:
+
+> I confirmed that the configured database and user match the Compose settings before looking for application tables.
+
+### List Tables With psql
+
+```bash
+docker compose exec postgres psql -U governance -d governance -c '\dt'
+```
+
+Why:
+
+- `\dt` is a `psql` meta-command that lists tables in the current schema.
+
+Result:
+
+```text
+Did not find any relations.
+```
+
+What that means:
+
+- PostgreSQL is working.
+- The `governance` database exists.
+- There are no application tables yet because we have not added Flyway migrations or JPA schema creation.
+
+Interview language:
+
+> The database is healthy, but there are no application tables yet because schema management has not been introduced.
+
+### List User Tables Through information_schema
+
+```bash
+docker compose exec postgres psql -U governance -d governance -c "select table_schema, table_name from information_schema.tables where table_schema not in ('pg_catalog', 'information_schema') order by table_schema, table_name;"
+```
+
+Why:
+
+- Uses standard SQL to list user-created tables.
+- Excludes PostgreSQL system schemas.
+
+Result:
+
+```text
+table_schema | table_name
+--------------+------------
+(0 rows)
+```
+
+Interview language:
+
+> I checked both the `psql` table listing and `information_schema` to confirm there are no user tables yet.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops and removes the PostgreSQL container and Compose network.
+- Preserves the named PostgreSQL data volume.
+
+Result:
+
+- Container stopped and was removed.
+- Network was removed.
+
+Interview language:
+
+> I stopped the local database after inspection so no background container continues using port 5432.
+
+### Confirm Final State
+
+```bash
+docker compose ps
+git status --short
+```
+
+Why:
+
+- Confirms no Compose services are running.
+- Checks source-control state after the inspection.
+
+Result:
+
+- No Compose services were running.
+- Git showed the local editor swap file `.compose.yaml.swp`.
+
+Follow-up:
+
+- Added `*.swp` to `.gitignore` so editor swap files are ignored without deleting local files.
+
+Interview language:
+
+> I ignore editor swap files because they are local machine artifacts, not project source.
