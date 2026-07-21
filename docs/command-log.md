@@ -1195,3 +1195,183 @@ Result:
 Interview language:
 
 > I reviewed the diff before committing so I could keep the practice-test checkpoint small and explainable.
+
+## Step 1.3: Runtime HTTP Verification
+
+### Confirm The Starting State
+
+```bash
+git status --short
+sed -n '1,80p' backend/src/main/resources/application.properties
+```
+
+Why:
+
+- Confirms Phase 1.3 starts from a clean Git checkpoint.
+- Reads the current application configuration before starting the server.
+
+Result:
+
+- The working tree was clean.
+- The application name was configured as `governance-platform`.
+
+Interview language:
+
+> Before runtime verification, I confirmed the repo was clean and checked the active application configuration.
+
+### Start The Backend Server
+
+```bash
+cd backend
+./mvnw spring-boot:run
+```
+
+Why:
+
+- Starts the Spring Boot application as a real local HTTP server.
+- Uses the Maven Wrapper, so global Maven is not required.
+
+Result:
+
+- Maven ran the Spring Boot plugin.
+- Tomcat started on port `8080`.
+- Spring Boot started the application with context path `/`.
+- Actuator exposed one endpoint beneath `/actuator`.
+
+Important log lines:
+
+```text
+Tomcat started on port 8080 (http) with context path '/'
+Started GovernancePlatformApplication
+```
+
+Interview language:
+
+> `spring-boot:run` starts the application locally using the embedded Tomcat server, which lets me test real HTTP requests against localhost.
+
+### Try Calling The Endpoint From The Sandboxed Shell
+
+```bash
+curl -i http://localhost:8080/api/v1/info
+curl -sS http://localhost:8080/api/v1/info
+```
+
+Why:
+
+- Calls the `/api/v1/info` endpoint over HTTP.
+- `-i` includes HTTP response headers.
+- `-sS` keeps output quiet but still shows errors.
+
+Result:
+
+- These first calls failed with:
+
+```text
+curl: (7) Failed to connect to localhost port 8080
+```
+
+What that means:
+
+- The server was running in an elevated command context.
+- The sandboxed command context could not reach that local process.
+- This was an environment boundary issue, not a Spring Boot application failure.
+
+Interview language:
+
+> The first HTTP call failed because of the local execution environment, not because the application was down. I confirmed the server process was still running before retrying from the matching context.
+
+### Confirm The Server Was Still Running
+
+The running server process was checked through the active terminal session.
+
+Result:
+
+- The Spring Boot process was still running.
+
+Interview language:
+
+> When a request fails, I first check whether the service is actually running before changing application code.
+
+### Call The Info Endpoint Successfully
+
+```bash
+curl -i http://localhost:8080/api/v1/info
+```
+
+Why:
+
+- Sends a real HTTP GET request to the running backend.
+- Includes response headers and body.
+
+Result:
+
+```text
+HTTP/1.1 200
+Content-Type: application/json
+```
+
+Response body:
+
+```json
+{"name":"governance-platform","description":"Enterprise data governance backend","apiVersion":"v1","status":"UP"}
+```
+
+Interview language:
+
+> I verified the endpoint through a real HTTP request, which proves the route works through embedded Tomcat, Spring MVC routing, controller execution, and JSON serialization.
+
+### Call The Actuator Health Endpoint
+
+```bash
+curl -i http://localhost:8080/actuator/health
+```
+
+Why:
+
+- Verifies Spring Boot Actuator health reporting.
+- Health endpoints are used by deployment platforms, load balancers, and monitoring systems.
+
+Result:
+
+```text
+HTTP/1.1 200
+Content-Type: application/vnd.spring-boot.actuator.v3+json
+```
+
+Response body:
+
+```json
+{"groups":["liveness","readiness"],"status":"UP"}
+```
+
+Interview language:
+
+> Actuator health gives an operational signal that the application is running and can participate in liveness/readiness checks.
+
+### Stop The Backend Server
+
+```text
+Ctrl+C
+```
+
+Why:
+
+- Stops the local development server after verification.
+- Prevents a background process from continuing to use port `8080`.
+
+Result:
+
+- Spring Boot performed a graceful shutdown.
+- Maven reported `BUILD SUCCESS`.
+
+Important log lines:
+
+```text
+Commencing graceful shutdown. Waiting for active requests to complete
+Graceful shutdown complete
+BUILD SUCCESS
+```
+
+Interview language:
+
+> I stopped the local server cleanly after testing, which freed the port and confirmed the application shut down gracefully.
