@@ -1375,3 +1375,46 @@ BUILD SUCCESS
 Interview language:
 
 > I stopped the local server cleanly after testing, which freed the port and confirmed the application shut down gracefully.
+
+### Where To Override The Spring Boot Port
+
+File:
+
+- `backend/src/main/resources/application.properties`
+
+Current content:
+
+```properties
+spring.application.name=governance-platform
+```
+
+Why:
+
+- Spring Boot uses port `8080` by default.
+- The default can be changed by setting `server.port`.
+
+Example:
+
+```properties
+spring.application.name=governance-platform
+server.port=8081
+```
+
+Result:
+
+- The backend would start on `http://localhost:8081` instead of `http://localhost:8080`.
+
+Temporary command-line override:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+Why:
+
+- Useful when port `8080` is already being used.
+- Avoids changing committed configuration for a one-time local run.
+
+Interview language:
+
+> Spring Boot uses port 8080 by default. I can override it with `server.port` in `application.properties`, or pass `--server.port` as a runtime argument for temporary local runs.
