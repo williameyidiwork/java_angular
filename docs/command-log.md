@@ -779,3 +779,329 @@ Result:
 Interview language:
 
 > I committed the backend scaffold separately so later business features can be reviewed independently from project setup.
+
+## Step 1.2: First API Endpoint
+
+### Confirm The Starting State
+
+```bash
+git status --short
+find backend/src -type f | sort
+sed -n '1,240p' backend/pom.xml
+sed -n '1,160p' backend/src/main/java/com/example/governance/GovernancePlatformApplication.java
+```
+
+Why:
+
+- `git status --short` confirms the working tree is clean before the next small checkpoint.
+- `find backend/src -type f | sort` lists backend source files using a built-in command that works even when `rg` is not installed.
+- Reading `pom.xml` confirms the current dependencies.
+- Reading the main application class confirms the base package for Spring component scanning.
+
+Result:
+
+- The working tree was clean.
+- The backend had only the generated application class, config file, and starter test.
+- The project already had Spring Web MVC, Actuator, Validation, and their test dependencies.
+
+Interview language:
+
+> Before adding the first endpoint, I confirmed the package structure and dependencies so the new controller fits the existing Spring Boot application.
+
+### Create API Package Folders
+
+```bash
+mkdir -p backend/src/main/java/com/example/governance/api backend/src/test/java/com/example/governance/api
+```
+
+Why:
+
+- Creates a production `api` package for controller classes.
+- Creates a matching test package for endpoint tests.
+- `mkdir -p` creates parent folders if needed and does not fail if they already exist.
+
+Result:
+
+- Created folders for the first API endpoint and its test.
+
+Interview language:
+
+> I put controller code in an `api` package to separate HTTP/API concerns from the application bootstrap class.
+
+### Add The Info Endpoint
+
+Files created:
+
+- `backend/src/main/java/com/example/governance/api/ApplicationInfoController.java`
+- `backend/src/main/java/com/example/governance/api/ApplicationInfoResponse.java`
+
+Why:
+
+- `ApplicationInfoController` exposes a read-only HTTP route: `/api/v1/info`.
+- `ApplicationInfoResponse` defines the JSON response shape using a Java record.
+- The `/api/v1` path introduces basic API versioning from the beginning.
+
+Result:
+
+- Added a controller that returns:
+
+```json
+{
+  "name": "governance-platform",
+  "description": "Enterprise data governance backend",
+  "apiVersion": "v1",
+  "status": "UP"
+}
+```
+
+Interview language:
+
+> A controller maps HTTP requests to backend behavior. I used a response DTO so the API contract is explicit instead of returning an unstructured map.
+
+### Add The Endpoint Test
+
+File created:
+
+- `backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java`
+
+Why:
+
+- Tests the endpoint through Spring's MVC test support.
+- Verifies the HTTP status and JSON fields.
+
+Result:
+
+- Added a test for `GET /api/v1/info`.
+
+Interview language:
+
+> I test the endpoint at the HTTP layer so I can verify both routing and JSON serialization, not just Java method behavior.
+
+### Review The New Files
+
+```bash
+sed -n '1,160p' backend/src/main/java/com/example/governance/api/ApplicationInfoController.java
+sed -n '1,160p' backend/src/main/java/com/example/governance/api/ApplicationInfoResponse.java
+sed -n '1,180p' backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java
+```
+
+Why:
+
+- Reads the files back after editing.
+- Confirms the controller, response record, and test are small and understandable.
+
+Result:
+
+- Verified the new files before running tests.
+
+Interview language:
+
+> After editing, I read back the files so I catch simple mistakes before running the full build.
+
+### Run The Test Suite
+
+```bash
+./mvnw test
+```
+
+Why:
+
+- Compiles production and test code.
+- Runs the Spring Boot context test and the new endpoint test.
+
+Result:
+
+- The first run failed during test compilation.
+- The import `org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc` did not exist in Spring Boot 4.1.0.
+
+What that means:
+
+- Many Spring Boot 3 examples use the older package path.
+- Spring Boot 4 has moved the MockMvc test auto-configuration classes.
+
+Interview language:
+
+> The build failed at test compilation, so I checked the dependency contents instead of guessing. The issue was an import path mismatch with Spring Boot 4.
+
+### Inspect The Downloaded Spring Boot Test Jars
+
+```bash
+find /Users/williameyidi/.m2/repository/org/springframework/boot -name '*webmvc-test*.jar' -print
+find /Users/williameyidi/.m2/repository/org/springframework/boot -name '*test*.jar' -maxdepth 6 -print | sed -n '1,120p'
+jar tf /Users/williameyidi/.m2/repository/org/springframework/boot/spring-boot-test-autoconfigure/4.1.0/spring-boot-test-autoconfigure-4.1.0.jar | grep -E 'AutoConfigure.*Mock|WebMvcTest|servlet' | sed -n '1,160p'
+jar tf /Users/williameyidi/.m2/repository/org/springframework/boot/spring-boot-webmvc-test/4.1.0/spring-boot-webmvc-test-4.1.0.jar | grep -E 'AutoConfigure|WebMvcTest|MockMvc|Test' | sed -n '1,160p'
+```
+
+Why:
+
+- Looks inside the locally downloaded Maven dependencies.
+- Finds the actual package containing `AutoConfigureMockMvc`.
+
+Result:
+
+- Found `AutoConfigureMockMvc` in:
+
+```text
+org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+```
+
+Interview language:
+
+> When documentation or examples do not match the installed version, I inspect the actual dependency jars to verify the available classes.
+
+### Fix The Test Import
+
+File updated:
+
+- `backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java`
+
+Change:
+
+```java
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+```
+
+Why:
+
+- Updates the test to use the Spring Boot 4 package.
+
+Result:
+
+- The test compiled with the current Spring Boot version.
+
+Interview language:
+
+> I updated the test to match the framework version we are actually using.
+
+### Rerun The Test Suite
+
+```bash
+./mvnw test
+```
+
+Why:
+
+- Verifies the import fix.
+- Confirms the endpoint works.
+
+Result:
+
+- Build succeeded.
+- Tests run: 2.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> After fixing the framework import, I reran the full backend test suite and confirmed both the application context and the new endpoint test passed.
+
+### Check The Working Tree After The Endpoint
+
+```bash
+git status --short
+find backend/src/main/java backend/src/test/java -type f | sort
+```
+
+Why:
+
+- Shows the files changed by this checkpoint.
+- Lists the source files now present in the backend.
+
+Result:
+
+- Git showed the new production `api` package and new test `api` package as untracked.
+- The backend now contains the application class, first API controller, response record, starter context test, and endpoint test.
+
+Interview language:
+
+> Before committing, I checked that this checkpoint contains only the first API endpoint and its test.
+
+### Final Checks Before Staging
+
+```bash
+git diff --check
+git status --short
+git status --short --ignored backend
+```
+
+Why:
+
+- `git diff --check` verifies there are no whitespace errors.
+- `git status --short` shows the modified and untracked source files.
+- `git status --short --ignored backend` confirms generated backend files remain ignored.
+
+Result:
+
+- `git diff --check` passed.
+- Git showed `docs/command-log.md` as modified.
+- Git showed the new API production and test packages as untracked.
+- Git showed ignored local files such as `backend/target/`, Eclipse metadata, `HELP.md`, and `.DS_Store`.
+
+Interview language:
+
+> I verified the commit boundary before staging so generated build output and IDE metadata stay out of source control.
+
+### Stage The Phase 1.2 Files
+
+```bash
+git add backend/src/main/java/com/example/governance/api backend/src/test/java/com/example/governance/api docs/command-log.md
+```
+
+Why:
+
+- Stages only the first API endpoint, its test, and the command log.
+
+Expected result:
+
+- The commit will contain a small, reviewable endpoint checkpoint.
+
+Interview language:
+
+> I stage the exact directories for this feature so the commit stays focused.
+
+### Inspect The Staged Files
+
+```bash
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+```
+
+Why:
+
+- `git diff --cached --name-only` lists exactly what will be committed.
+- `git diff --cached --check` checks staged files for whitespace issues.
+- `git status --short` confirms the staged state.
+
+Result:
+
+- Staged files were:
+  - `ApplicationInfoController.java`
+  - `ApplicationInfoResponse.java`
+  - `ApplicationInfoControllerTests.java`
+  - `docs/command-log.md`
+- The staged whitespace check passed.
+
+Interview language:
+
+> I inspect staged files before committing so I can explain exactly what the checkpoint contains.
+
+### Commit The Phase 1.2 Checkpoint
+
+```bash
+git add docs/command-log.md
+git commit -m "feat: add application info endpoint"
+```
+
+Why:
+
+- Restages the command log after documenting the staged-file inspection.
+- Commits the first API endpoint as a focused feature checkpoint.
+
+Expected result:
+
+- A commit containing the `/api/v1/info` endpoint, its response DTO, its endpoint test, and the command notes.
+
+Interview language:
+
+> I committed the first endpoint separately because it proves the web layer works before adding database or security concerns.
