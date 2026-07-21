@@ -1105,3 +1105,93 @@ Expected result:
 Interview language:
 
 > I committed the first endpoint separately because it proves the web layer works before adding database or security concerns.
+
+## Step 1.2a: Practice Endpoint Tests
+
+### Notice Existing Test Changes
+
+```bash
+git status --short
+git diff -- backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java
+sed -n '1,180p' backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java
+```
+
+Why:
+
+- Checks whether the working tree is clean before starting Phase 1.3.
+- Inspects the existing test changes instead of overwriting them.
+- Reads the full test file to understand the intent.
+
+Result:
+
+- Found two additional endpoint tests in `ApplicationInfoControllerTests.java`.
+- The tests were related to the current endpoint, so they were kept and cleaned up.
+
+Interview language:
+
+> When I find existing uncommitted work, I inspect it first and preserve the intent instead of blindly overwriting it.
+
+### Tidy The Additional Tests
+
+File updated:
+
+- `backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java`
+
+Why:
+
+- Fixed the test method typo from `Infor` to `Info`.
+- Removed extra blank lines and spacing.
+- Aligned the MockMvc assertion chains.
+- Put the `status().isOk()` assertion before JSON assertions in the status-focused test.
+
+Result:
+
+- Added two clean test methods:
+
+```java
+getApplicationInfoReturnsStatusOk()
+getApplicationInfoReturnsDescription()
+```
+
+Interview language:
+
+> Test names should read like behavior descriptions. Clean naming makes test reports easier to understand.
+
+### Run The Backend Tests
+
+```bash
+./mvnw test
+```
+
+Why:
+
+- Verifies that the extra endpoint tests compile and pass.
+
+Result:
+
+- Build succeeded.
+- Tests run: 4.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> After changing tests, I reran the backend suite to confirm the behavior is still green.
+
+### Review The Final Test Diff
+
+```bash
+git diff -- backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java
+```
+
+Why:
+
+- Confirms the checkpoint only adds the two intended endpoint tests.
+
+Result:
+
+- The diff was focused on two test methods.
+
+Interview language:
+
+> I reviewed the diff before committing so I could keep the practice-test checkpoint small and explainable.

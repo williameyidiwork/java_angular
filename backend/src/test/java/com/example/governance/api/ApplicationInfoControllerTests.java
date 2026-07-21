@@ -26,4 +26,17 @@ class ApplicationInfoControllerTests {
 				.andExpect(jsonPath("$.apiVersion").value("v1"))
 				.andExpect(jsonPath("$.status").value("UP"));
 	}
+
+	@Test
+	void getApplicationInfoReturnsStatusOk() throws Exception {
+		mockMvc.perform(get("/api/v1/info"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.name").value("governance-platform"));
+	}
+
+	@Test
+	void getApplicationInfoReturnsDescription() throws Exception {
+		mockMvc.perform(get("/api/v1/info"))
+				.andExpect(jsonPath("$.description").value("Enterprise data governance backend"));
+	}
 }
