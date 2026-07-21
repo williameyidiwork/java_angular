@@ -2021,3 +2021,467 @@ Follow-up:
 Interview language:
 
 > I ignore editor swap files because they are local machine artifacts, not project source.
+
+## Step 2.2: Connect Spring Boot To PostgreSQL
+
+### Check Starting State
+
+```bash
+git status --short
+docker compose ps
+sed -n '1,220p' backend/pom.xml
+sed -n '1,120p' backend/src/main/resources/application.properties
+```
+
+Why:
+
+- Confirms the repo is clean before changing backend dependencies.
+- Confirms no Compose services are running.
+- Reads the current Maven dependencies and application config.
+
+Result:
+
+- Git was clean.
+- No Compose services were running.
+- Backend had web, actuator, validation, and test dependencies only.
+- `application.properties` only contained `spring.application.name`.
+
+Interview language:
+
+> I checked the current backend build and config before adding database integration so the change stays focused.
+
+### Confirm Current Spring Boot Database Dependencies
+
+```bash
+curl -sS --get https://start.spring.io/starter.zip --data-urlencode type=maven-project --data-urlencode language=java --data-urlencode javaVersion=21 --data-urlencode dependencies=data-jpa,postgresql,flyway --data-urlencode groupId=com.example --data-urlencode artifactId=dependency-check --data-urlencode name=dependency-check --data-urlencode packageName=com.example.check --data-urlencode packaging=jar -o /tmp/governance-platform-db-deps.zip
+unzip -p /tmp/governance-platform-db-deps.zip pom.xml | sed -n '1,220p'
+unzip -l /tmp/governance-platform-db-deps.zip | sed -n '1,80p'
+```
+
+Why:
+
+- Uses Spring Initializr as the source of truth for current Spring Boot 4 dependency names.
+- Saves the temporary project outside the repository.
+- Inspects only the generated `pom.xml`.
+
+Result:
+
+- Confirmed these dependencies:
+
+```xml
+spring-boot-starter-data-jpa
+spring-boot-starter-flyway
+flyway-database-postgresql
+postgresql
+spring-boot-starter-data-jpa-test
+spring-boot-starter-flyway-test
+```
+
+Interview language:
+
+> I confirmed the dependency names from Spring Initializr instead of guessing, because Spring Boot 4 starter names differ from some older examples.
+
+### Add Database Dependencies And Config
+
+Files updated:
+
+- `backend/pom.xml`
+- `backend/src/main/resources/application.properties`
+
+Files added:
+
+- `backend/src/main/resources/db/migration/.gitkeep`
+- `backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java`
+
+Why:
+
+- Adds Spring Data JPA for persistence support.
+- Adds Flyway for schema migrations.
+- Adds PostgreSQL JDBC driver for runtime database connections.
+- Adds database test dependencies.
+- Configures datasource URL, username, and password with environment-variable overrides.
+- Sets `spring.jpa.hibernate.ddl-auto=validate` so Hibernate does not silently create tables.
+- Sets `spring.jpa.open-in-view=false` to avoid keeping persistence sessions open during web rendering.
+- Enables health details so local Actuator output shows database status.
+- Adds an empty migration folder marker so the Flyway location exists before real migrations are added.
+- Adds a JDBC test that verifies Spring can query the configured database.
+
+Configuration added:
+
+```properties
+spring.datasource.url=${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/governance}
+spring.datasource.username=${SPRING_DATASOURCE_USERNAME:governance}
+spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:governance}
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.open-in-view=false
+management.endpoint.health.show-details=always
+```
+
+Interview language:
+
+> I configured the backend to use PostgreSQL through Spring Boot datasource properties, but kept schema creation under Flyway control instead of allowing Hibernate to auto-create tables.
+
+### Review The Backend Changes
+
+```bash
+sed -n '1,260p' backend/pom.xml
+sed -n '1,120p' backend/src/main/resources/application.properties
+sed -n '1,180p' backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java
+find backend/src/main/resources -type f | sort
+```
+
+Why:
+
+- Reads the changed Maven file.
+- Reads the datasource configuration.
+- Reads the new database connectivity test.
+- Confirms the migration folder marker exists.
+
+Result:
+
+- Confirmed the dependencies, config, `.gitkeep`, and database test.
+
+Interview language:
+
+> After editing backend configuration, I read the files back before running tests so simple configuration mistakes are easier to catch.
+
+### Start PostgreSQL For Backend Tests
+
+```bash
+docker compose up -d postgres
+docker compose ps
+docker compose exec postgres pg_isready -U governance -d governance
+```
+
+Why:
+
+- Starts the local PostgreSQL dependency.
+- Checks container status.
+- Checks database readiness.
+
+Result:
+
+- PostgreSQL started.
+- `pg_isready` reported it was accepting connections.
+
+Interview language:
+
+> Once the Spring context needs a datasource, the local database must be running before integration-style tests can pass.
+
+### Run Backend Tests Against PostgreSQL
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Downloads new database dependencies.
+- Compiles the backend.
+- Starts the Spring test context with a real PostgreSQL datasource.
+- Runs the explicit JDBC connectivity test.
+
+Result:
+
+- Build succeeded.
+- Tests run: 5.
+- Failures: 0.
+- Errors: 0.
+
+Important runtime signals:
+
+```text
+HikariPool - Start completed
+Database: jdbc:postgresql://localhost:5432/governance
+PostgreSQL 17.10
+Found 0 JPA repository interfaces
+Successfully validated 0 migrations
+No migrations found
+```
+
+What that means:
+
+- Spring Boot connected through HikariCP.
+- Flyway reached PostgreSQL.
+- Hibernate initialized against PostgreSQL.
+- There are no repositories/entities yet, which is expected.
+- There are no business migrations yet, which is expected.
+
+Interview language:
+
+> The test run proved the backend can start with a real PostgreSQL datasource. Hikari opened a connection pool, Flyway checked migrations, Hibernate initialized JPA, and the JDBC test queried the configured database.
+
+### Inspect Tables After Flyway Runs
+
+```bash
+docker compose ps
+docker compose exec postgres psql -U governance -d governance -c '\dt'
+docker compose exec postgres psql -U governance -d governance -c "select table_name from information_schema.tables where table_schema = 'public' order by table_name;"
+```
+
+Why:
+
+- Checks container health.
+- Lists tables after the application test run.
+- Confirms whether Flyway created any metadata.
+
+Result:
+
+- PostgreSQL container was healthy.
+- One table existed:
+
+```text
+flyway_schema_history
+```
+
+What that means:
+
+- Flyway created its schema history table.
+- No business tables exist yet.
+
+Interview language:
+
+> `flyway_schema_history` is Flyway's bookkeeping table. It records migration history; it is not an application business table.
+
+### Try To Run The Backend Normally
+
+```bash
+cd backend
+./mvnw spring-boot:run
+```
+
+Why:
+
+- Starts the backend as a real local server with the new database configuration.
+
+Result:
+
+- The app connected to PostgreSQL successfully.
+- Startup failed because port `8080` was already in use.
+
+Important output:
+
+```text
+Web server failed to start. Port 8080 was already in use.
+```
+
+Interview language:
+
+> The database integration worked, but the web server could not bind to port 8080 because another process was already using it.
+
+### Run The Backend On A Temporary Port
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+Why:
+
+- Runs the backend on port `8081` without changing committed configuration.
+- Uses the temporary Spring Boot runtime argument learned earlier.
+
+Result:
+
+- Tomcat started on port `8081`.
+- Hikari connected to PostgreSQL.
+- Flyway checked migrations.
+- Hibernate initialized JPA.
+- The application started successfully.
+
+Interview language:
+
+> I used a runtime port override to avoid changing source config for a local port conflict.
+
+### Verify Runtime Database Health
+
+```bash
+curl -i http://localhost:8081/actuator/health
+curl -i http://localhost:8081/api/v1/info
+```
+
+Why:
+
+- Calls the running application over real HTTP.
+- Verifies Actuator reports database health.
+- Confirms the existing info endpoint still works after adding database configuration.
+
+Result:
+
+- `/actuator/health` returned `HTTP/1.1 200`.
+- Health output included:
+
+```json
+"db":{"details":{"database":"PostgreSQL","validationQuery":"isValid()"},"status":"UP"}
+```
+
+- `/api/v1/info` returned `HTTP/1.1 200` and the expected JSON response.
+
+Interview language:
+
+> Runtime health showed `db.status=UP`, which proves the running service can reach PostgreSQL through its configured datasource.
+
+### Stop Runtime Services
+
+```text
+Ctrl+C
+docker compose down
+```
+
+Why:
+
+- Stops the Spring Boot app cleanly.
+- Stops and removes the PostgreSQL container and Compose network.
+- Preserves the named PostgreSQL volume.
+
+Result:
+
+- Spring Boot performed graceful shutdown.
+- JPA EntityManagerFactory closed.
+- Hikari connection pool shut down.
+- PostgreSQL container and network were removed.
+
+Interview language:
+
+> I stopped both the app and database after verification so no background service kept using local ports.
+
+### Final Runtime And Source Check
+
+```bash
+docker compose ps
+git status --short
+git diff -- backend/pom.xml backend/src/main/resources/application.properties backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java backend/src/main/resources/db/migration/.gitkeep | sed -n '1,260p'
+```
+
+Why:
+
+- Confirms no Compose services are running.
+- Shows the source files changed by this checkpoint.
+- Reviews the diff before documentation and commit.
+
+Result:
+
+- No Compose services were running.
+- Git showed backend dependency/config/test changes.
+
+Interview language:
+
+> I checked both runtime cleanup and source diff before committing the database integration checkpoint.
+
+### Add README Backend Instructions
+
+File updated:
+
+- `README.md`
+
+Why:
+
+- Backend tests now require PostgreSQL to be running.
+- README should tell developers how to start PostgreSQL, run tests, and use a temporary port if `8080` is busy.
+
+Commands documented:
+
+```bash
+docker compose up -d postgres
+cd backend
+./mvnw test
+./mvnw spring-boot:run
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+Interview language:
+
+> I updated developer documentation when the test workflow changed, because backend tests now depend on the local PostgreSQL service.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- `git diff --check` verifies whitespace.
+- `docker compose ps` confirms no runtime services are still running.
+- `git status --short` lists changed and untracked files.
+- `git diff --stat` gives a compact summary of the checkpoint.
+
+Result:
+
+- Whitespace check passed.
+- No Compose services were running.
+- Git showed README, backend config/dependency changes, command log changes, and new database resource/test folders.
+
+Interview language:
+
+> I verified both runtime cleanup and source-control state before staging the database integration commit.
+
+### Stage The Phase 2.2 Files
+
+```bash
+git add README.md backend/pom.xml backend/src/main/resources/application.properties backend/src/main/resources/db/migration/.gitkeep backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java docs/command-log.md
+```
+
+Why:
+
+- Stages the exact database integration files and documentation.
+
+Expected result:
+
+- A focused commit containing the Spring Boot PostgreSQL connection work.
+
+Interview language:
+
+> I stage the exact files for this integration checkpoint so generated build output stays out of the commit.
+
+### Inspect The Staged Files
+
+```bash
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+```
+
+Why:
+
+- Lists exactly what will be committed.
+- Checks staged files for whitespace issues.
+- Confirms the staged state.
+
+Result:
+
+- Staged files were:
+  - `README.md`
+  - `backend/pom.xml`
+  - `backend/src/main/resources/application.properties`
+  - `backend/src/main/resources/db/migration/.gitkeep`
+  - `backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java`
+  - `docs/command-log.md`
+- Staged whitespace check passed.
+
+Interview language:
+
+> I inspect the staged files before committing so the database integration checkpoint is reviewable and explainable.
+
+### Commit The Phase 2.2 Checkpoint
+
+```bash
+git add docs/command-log.md
+git commit -m "feat: connect backend to PostgreSQL"
+```
+
+Why:
+
+- Restages the command log after documenting the staged-file inspection.
+- Commits the Spring Boot PostgreSQL integration as a focused checkpoint.
+
+Expected result:
+
+- A commit containing the backend database dependencies, datasource config, migration folder marker, database connectivity test, README notes, and command trail.
+
+Interview language:
+
+> I committed the database connection separately before adding business tables, which keeps connectivity concerns distinct from schema design.

@@ -86,6 +86,29 @@ The named Docker volume `governance-platform_postgres_data` preserves database f
 
 Optional environment overrides can be copied from `.env.example` into a local `.env` file. The `.env` file is ignored by Git.
 
+### Backend
+
+Start PostgreSQL before running backend tests:
+
+```bash
+docker compose up -d postgres
+cd backend
+./mvnw test
+```
+
+Run the backend locally:
+
+```bash
+cd backend
+./mvnw spring-boot:run
+```
+
+If port `8080` is already in use, run the backend on a temporary port:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
 Cloud path:
 
 - Amazon ECS Fargate or EKS for backend containers
