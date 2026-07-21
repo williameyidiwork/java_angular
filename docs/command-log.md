@@ -387,3 +387,95 @@ Git status:
 
 - Step 0 documentation has been committed.
 - The next checkpoint is Step 1: Spring Boot backend skeleton.
+
+## Step 1 Preflight: Java And Maven Availability
+
+### Check Whether Maven Is Installed
+
+```bash
+command -v mvn
+```
+
+Why:
+
+- Checks whether the `mvn` command is available in the shell PATH.
+- `command -v` is a portable way to ask the shell where a command comes from.
+
+Result:
+
+- No path was returned, so Maven is not currently available as a global command.
+
+What that means:
+
+- This is not a blocker.
+- Professional Java projects often commit the Maven Wrapper, which lets developers run `./mvnw` without installing Maven globally.
+
+Interview language:
+
+> I do not require every developer to install Maven manually. I use the Maven Wrapper so the project can run with a consistent Maven version from the repository.
+
+### Check Whether Java Is Installed
+
+```bash
+command -v java
+command -v javac
+```
+
+Why:
+
+- `java` runs compiled Java applications.
+- `javac` compiles Java source code.
+- A Spring Boot backend needs a JDK, not only a JRE.
+
+Result:
+
+- `java` was found at `/usr/bin/java`.
+- `javac` was found at `/usr/bin/javac`.
+
+Interview language:
+
+> I checked both the runtime and compiler because backend development needs the full JDK.
+
+### Check The Java Version
+
+```bash
+java -version
+javac -version
+```
+
+Why:
+
+- Confirms whether the installed JDK is compatible with the planned backend.
+- The roadmap targets Java 21.
+
+Result:
+
+- Java runtime: Temurin OpenJDK 25.0.3 LTS.
+- Java compiler: `javac 25.0.3`.
+
+What that means:
+
+- The installed JDK is newer than Java 21.
+- The project can still target Java 21 by setting the Java version in the Maven build.
+
+Interview language:
+
+> My machine has a newer JDK installed, but the project build can still target Java 21 so the application has a predictable runtime baseline.
+
+### Check The Git Working Tree
+
+```bash
+git status --short
+```
+
+Why:
+
+- Confirms whether there are uncommitted changes before starting the next implementation checkpoint.
+
+Result:
+
+- The working tree was clean before this command-log update.
+
+Interview language:
+
+> I check Git status between checkpoints so every step starts from a known clean state.
