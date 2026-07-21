@@ -1418,3 +1418,418 @@ Why:
 Interview language:
 
 > Spring Boot uses port 8080 by default. I can override it with `server.port` in `application.properties`, or pass `--server.port` as a runtime argument for temporary local runs.
+
+## Step 2.1: Local PostgreSQL With Docker Compose
+
+### Confirm The Starting State
+
+```bash
+git status --short
+find . -maxdepth 3 -type f | sort | sed -n '1,160p'
+docker info
+```
+
+Why:
+
+- `git status --short` confirms the working tree is clean before adding infrastructure files.
+- `find` lists current files using a built-in command.
+- `docker info` checks whether Docker is installed and whether the Docker daemon is running.
+
+Result:
+
+- The working tree was clean.
+- Docker CLI was installed.
+- Docker Compose was available as a Docker plugin.
+- Docker daemon was not running yet.
+
+Important output:
+
+```text
+Cannot connect to the Docker daemon
+```
+
+Interview language:
+
+> Before adding local infrastructure, I checked the repository state and verified whether Docker was available and running.
+
+### Start Docker Desktop
+
+```bash
+open -a Docker
+```
+
+Why:
+
+- Starts Docker Desktop on macOS so the Docker daemon becomes available.
+
+Result:
+
+- Docker Desktop opened successfully.
+
+Interview language:
+
+> Docker commands need the Docker daemon. On macOS, Docker Desktop provides that daemon.
+
+### Add Docker Compose PostgreSQL Configuration
+
+Files created:
+
+- `compose.yaml`
+- `.env.example`
+
+Why:
+
+- `compose.yaml` defines the local PostgreSQL service.
+- `.env.example` documents configurable local database variables without committing a real `.env` file.
+- The actual `.env` file is ignored by Git.
+
+Compose service:
+
+```yaml
+postgres:
+  image: postgres:17-alpine
+  container_name: governance-platform-postgres
+```
+
+Important settings:
+
+- `POSTGRES_DB`: creates the local database.
+- `POSTGRES_USER`: creates the local database user.
+- `POSTGRES_PASSWORD`: sets the local development password.
+- `POSTGRES_PORT`: maps the host port to the container port.
+- `postgres_data`: named Docker volume for persistent database files.
+- `healthcheck`: uses `pg_isready` to report when PostgreSQL is ready.
+
+Interview language:
+
+> I use Docker Compose to make PostgreSQL repeatable locally. The database, user, password, port, health check, and storage volume are defined as code.
+
+### Review The New Files
+
+```bash
+sed -n '1,180p' compose.yaml
+sed -n '1,80p' .env.example
+git status --short
+```
+
+Why:
+
+- Reads the Compose and environment example files after editing.
+- Confirms Git sees the new files as untracked before staging.
+
+Result:
+
+- Confirmed the PostgreSQL service definition.
+- Confirmed default local values:
+
+```text
+POSTGRES_DB=governance
+POSTGRES_USER=governance
+POSTGRES_PASSWORD=governance
+POSTGRES_PORT=5432
+```
+
+Interview language:
+
+> After adding infrastructure configuration, I read it back before running it so I can catch simple mistakes early.
+
+### Validate The Compose File
+
+```bash
+docker compose config
+```
+
+Why:
+
+- Validates and expands the Compose file.
+- Confirms environment-variable defaults resolve correctly.
+- Does not start containers.
+
+Result:
+
+- Compose validation passed.
+- Docker expanded the project name, network name, volume name, port mapping, environment variables, and health check.
+
+Interview language:
+
+> I validate Docker Compose configuration before starting containers so YAML and variable mistakes fail fast.
+
+### Check Docker Readiness Again
+
+```bash
+docker info
+```
+
+Why:
+
+- Confirms Docker Desktop is now running before starting the database.
+
+Result:
+
+- Docker daemon was available.
+- Docker server reported version `29.4.3`.
+
+Interview language:
+
+> I rechecked Docker after opening Docker Desktop to confirm the daemon was ready.
+
+### Start PostgreSQL
+
+```bash
+docker compose up -d postgres
+```
+
+Why:
+
+- Starts only the PostgreSQL service.
+- `-d` runs it in detached/background mode.
+
+Result:
+
+- Docker pulled the `postgres:17-alpine` image.
+- Docker created the Compose network.
+- Docker created the named volume.
+- Docker created and started the `governance-platform-postgres` container.
+
+Interview language:
+
+> `docker compose up -d postgres` starts the database dependency in the background so the backend can later connect to a repeatable local PostgreSQL instance.
+
+### Check Container Health
+
+```bash
+docker compose ps
+docker compose exec postgres pg_isready -U governance -d governance
+```
+
+Why:
+
+- `docker compose ps` shows container status, ports, and health.
+- `pg_isready` asks PostgreSQL whether it can accept connections.
+
+Result:
+
+- Container status was `Up` and `healthy`.
+- PostgreSQL reported:
+
+```text
+/var/run/postgresql:5432 - accepting connections
+```
+
+Interview language:
+
+> I do not assume a started container means the database is ready. I check the health status and use `pg_isready` to verify PostgreSQL can accept connections.
+
+### Verify Database And User
+
+```bash
+docker compose exec postgres psql -U governance -d governance -c 'select current_database(), current_user;'
+```
+
+Why:
+
+- Runs a SQL query inside the PostgreSQL container.
+- Confirms the configured database and user are active.
+
+Result:
+
+```text
+current_database | current_user
+------------------+--------------
+governance        | governance
+```
+
+Interview language:
+
+> I verified the database by running a real SQL query, not just checking that the container started.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops and removes the running container and network.
+- Preserves the named Docker volume because `-v` was not used.
+
+Result:
+
+- Container stopped and was removed.
+- Compose network was removed.
+- The data volume was preserved.
+
+Interview language:
+
+> I used `docker compose down` to stop the local service cleanly while preserving the named data volume for future runs.
+
+### Confirm Services Are Stopped
+
+```bash
+docker compose ps
+git status --short
+docker volume ls --filter name=governance-platform_postgres_data
+```
+
+Why:
+
+- Confirms no Compose services are running.
+- Checks which files still need to be committed.
+- Confirms the named database volume still exists.
+
+Result:
+
+- `docker compose ps` showed no running services.
+- Git showed `.env.example` and `compose.yaml` as untracked.
+- The first direct `docker volume ls` call hit a Docker socket permission boundary.
+
+Interview language:
+
+> After stopping local services, I verify both runtime cleanup and source-control state.
+
+### Check The Preserved Docker Volume
+
+```bash
+docker volume ls --filter name=governance-platform_postgres_data
+```
+
+Why:
+
+- Confirms the named volume still exists after `docker compose down`.
+
+Result:
+
+```text
+DRIVER    VOLUME NAME
+local     governance-platform_postgres_data
+```
+
+Interview language:
+
+> The container can be removed without losing local PostgreSQL files because database storage lives in a named Docker volume.
+
+### Add README Usage Notes
+
+File updated:
+
+- `README.md`
+
+Why:
+
+- Adds the basic local PostgreSQL workflow where a developer is most likely to look first.
+- Keeps the command log detailed while keeping the README practical.
+
+README commands added:
+
+```bash
+docker compose up -d postgres
+docker compose ps
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose down
+```
+
+Interview language:
+
+> I documented the common local database commands in the README so another developer can start, check, and stop the dependency without reading the full command log.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose config
+git status --short
+sed -n '35,110p' README.md
+```
+
+Why:
+
+- `git diff --check` confirms the new files and docs do not contain whitespace problems.
+- `docker compose config` revalidates the Compose file after documentation changes.
+- `git status --short` shows the exact files waiting to be committed.
+- Reading the README section confirms the developer-facing instructions are clear.
+
+Result:
+
+- Whitespace check passed.
+- Compose validation passed.
+- Git showed:
+
+```text
+M README.md
+M docs/command-log.md
+?? .env.example
+?? compose.yaml
+```
+
+Interview language:
+
+> Before committing infrastructure configuration, I validated the Compose file again and checked that only the intended config and documentation files were changed.
+
+### Stage The Phase 2.1 Files
+
+```bash
+git add compose.yaml .env.example README.md docs/command-log.md
+```
+
+Why:
+
+- Stages the PostgreSQL Compose file.
+- Stages the environment example.
+- Stages README usage notes.
+- Stages the command log.
+
+Result:
+
+- Staging succeeded.
+
+Interview language:
+
+> I staged only the local database platform files and related documentation so the commit stays focused.
+
+### Inspect The Staged Files
+
+```bash
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+```
+
+Why:
+
+- `git diff --cached --name-only` lists exactly what will be committed.
+- `git diff --cached --check` checks staged files for whitespace issues.
+- `git status --short` confirms the staged state.
+
+Result:
+
+- Staged files were:
+  - `.env.example`
+  - `README.md`
+  - `compose.yaml`
+  - `docs/command-log.md`
+- Staged whitespace check passed.
+
+Interview language:
+
+> I inspect staged files before committing so the checkpoint is easy to review and explain.
+
+### Commit The Phase 2.1 Checkpoint
+
+```bash
+git add docs/command-log.md
+git commit -m "chore: add local PostgreSQL compose service"
+```
+
+Why:
+
+- Restages the command log after documenting the staged-file inspection.
+- Commits the local PostgreSQL platform as its own infrastructure checkpoint.
+
+Expected result:
+
+- A commit containing the Docker Compose PostgreSQL service, environment example, README usage notes, and command trail.
+
+Interview language:
+
+> I committed the local database platform separately before wiring it into Spring Boot, which keeps infrastructure setup and application integration as two clear reviewable steps.

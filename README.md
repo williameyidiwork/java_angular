@@ -52,6 +52,40 @@ Local platform:
 - Docker
 - Docker Compose
 
+## Local Development
+
+### PostgreSQL
+
+The local PostgreSQL database runs through Docker Compose.
+
+Start PostgreSQL:
+
+```bash
+docker compose up -d postgres
+```
+
+Check service status:
+
+```bash
+docker compose ps
+```
+
+Verify PostgreSQL readiness:
+
+```bash
+docker compose exec postgres pg_isready -U governance -d governance
+```
+
+Stop local services:
+
+```bash
+docker compose down
+```
+
+The named Docker volume `governance-platform_postgres_data` preserves database files between container restarts.
+
+Optional environment overrides can be copied from `.env.example` into a local `.env` file. The `.env` file is ignored by Git.
+
 Cloud path:
 
 - Amazon ECS Fargate or EKS for backend containers
