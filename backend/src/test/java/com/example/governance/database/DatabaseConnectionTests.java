@@ -7,7 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Map;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest
 class DatabaseConnectionTests {
@@ -21,8 +21,7 @@ class DatabaseConnectionTests {
 				"select current_database() as database_name, current_user as user_name"
 		);
 
-		assertThat(result)
-				.containsEntry("database_name", "governance")
-				.containsEntry("user_name", "governance");
+		assertEquals("governance", result.get("database_name"));
+		assertEquals("governance", result.get("user_name"));
 	}
 }

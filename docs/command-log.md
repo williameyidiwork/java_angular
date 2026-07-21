@@ -2485,3 +2485,155 @@ Expected result:
 Interview language:
 
 > I committed the database connection separately before adding business tables, which keeps connectivity concerns distinct from schema design.
+
+## Step 2.2a: Refactor Database Test To JUnit Assertions
+
+### Inspect The Current Database Test
+
+```bash
+git status --short
+sed -n '1,180p' backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java
+docker compose ps
+```
+
+Why:
+
+- Confirms the repo is clean before changing the test.
+- Reads the current database connection test.
+- Confirms PostgreSQL is not already running.
+
+Result:
+
+- Git was clean.
+- The database test already used JUnit's `@Test`.
+- The assertions were written with AssertJ.
+- No Compose services were running.
+
+Interview language:
+
+> I inspected the test before changing it so the refactor only changed assertion style, not test behavior.
+
+### Replace AssertJ Assertions With JUnit Assertions
+
+File updated:
+
+- `backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java`
+
+Change:
+
+```java
+import static org.junit.jupiter.api.Assertions.assertEquals;
+```
+
+Assertions:
+
+```java
+assertEquals("governance", result.get("database_name"));
+assertEquals("governance", result.get("user_name"));
+```
+
+Why:
+
+- Makes the test visibly use JUnit assertions.
+- Keeps the same SQL query and real database verification.
+
+Result:
+
+- The database test now uses JUnit `assertEquals`.
+
+Interview language:
+
+> The test was already a JUnit test because it used JUnit's `@Test`; I changed the assertions to JUnit assertions so the whole test reads as plain JUnit.
+
+### Why This Test Does Not Mock The Database
+
+Reason:
+
+- This is an integration test, not a pure unit test.
+- Its job is to prove the real Spring datasource configuration can reach real PostgreSQL.
+
+What the real database test verifies:
+
+- The datasource URL is correct.
+- The username and password work.
+- The PostgreSQL JDBC driver is present.
+- HikariCP can open a connection.
+- PostgreSQL is accepting connections.
+- Spring can inject and use `JdbcTemplate`.
+- A real SQL query returns the expected database and user.
+
+What a mock would not verify:
+
+- Whether PostgreSQL is actually running.
+- Whether the JDBC URL is correct.
+- Whether credentials are correct.
+- Whether the PostgreSQL driver is on the classpath.
+- Whether the app can open a real database connection.
+
+Interview language:
+
+> I would mock repositories or services in unit tests, but I do not mock this database connection test because its purpose is to verify the real integration between Spring Boot, the JDBC driver, HikariCP, and PostgreSQL.
+
+### Start PostgreSQL For The Integration Test
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+```
+
+Why:
+
+- Starts the real PostgreSQL dependency.
+- Confirms it is accepting connections before running tests.
+
+Result:
+
+- PostgreSQL started.
+- `pg_isready` reported it was accepting connections.
+
+Interview language:
+
+> Because this test uses a real database, I start PostgreSQL before running the backend test suite.
+
+### Run The Backend Tests
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Verifies the JUnit assertion refactor.
+- Confirms the database integration test still passes.
+
+Result:
+
+- Build succeeded.
+- Tests run: 5.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> After changing the assertion style, I reran the backend test suite to verify behavior did not change.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops the database after the integration test run.
+
+Result:
+
+- PostgreSQL container and Compose network were removed.
+- The named data volume was preserved.
+
+Interview language:
+
+> I stopped PostgreSQL after testing so no background service continued using local port 5432.
