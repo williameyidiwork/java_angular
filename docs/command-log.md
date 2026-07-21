@@ -479,3 +479,303 @@ Result:
 Interview language:
 
 > I check Git status between checkpoints so every step starts from a known clean state.
+
+## Step 1.1: Spring Boot Backend Scaffold
+
+### Confirm The Starting State
+
+```bash
+git status --short
+rg --files
+java -version
+```
+
+Why:
+
+- `git status --short` confirms there are no uncommitted changes before creating the backend.
+- `rg --files` lists the current project files so we can see the repo shape.
+- `java -version` confirms the Java runtime before generating a Java project.
+
+Result:
+
+- The Git working tree was clean.
+- The repository contained the root README and docs.
+- Java was available as Temurin OpenJDK 25.0.3.
+
+Interview language:
+
+> I start each implementation checkpoint by checking the repository state and local runtime so I know I am building from a clean baseline.
+
+### Try To Download The Spring Boot Starter
+
+```bash
+curl -sS --get https://start.spring.io/starter.zip --data-urlencode type=maven-project --data-urlencode language=java --data-urlencode javaVersion=21 --data-urlencode dependencies=web,actuator,validation --data-urlencode groupId=com.example --data-urlencode artifactId=governance-platform --data-urlencode name=governance-platform --data-urlencode description=Enterprise data governance backend --data-urlencode packageName=com.example.governance --data-urlencode packaging=jar -o /tmp/governance-platform-backend.zip
+```
+
+Why:
+
+- Downloads a standard Spring Boot project from the official Spring Initializr service.
+- Requests a Maven project, Java 21 target, Spring Web MVC, Actuator, and Validation.
+- Writes the generated zip to `/tmp` before extracting it into the repository.
+
+Result:
+
+- The command failed because the description value contained spaces and was not quoted.
+- The shell treated `data`, `governance`, and `backend` as separate hostnames.
+
+Interview language:
+
+> When a shell command has an argument with spaces, I quote that argument so the shell passes it as one value.
+
+### Retry The Download With Correct Quoting
+
+```bash
+curl -sS --get https://start.spring.io/starter.zip --data-urlencode type=maven-project --data-urlencode language=java --data-urlencode javaVersion=21 --data-urlencode dependencies=web,actuator,validation --data-urlencode groupId=com.example --data-urlencode artifactId=governance-platform --data-urlencode name=governance-platform --data-urlencode 'description=Enterprise data governance backend' --data-urlencode packageName=com.example.governance --data-urlencode packaging=jar -o /tmp/governance-platform-backend.zip
+```
+
+Why:
+
+- Retries the same official Spring Initializr download with the description argument correctly quoted.
+
+Result:
+
+- Downloaded the starter zip successfully.
+
+Interview language:
+
+> I generated the project from Spring Initializr so the backend starts with the standard Spring Boot layout and a committed Maven Wrapper.
+
+### Inspect The Downloaded Archive
+
+```bash
+unzip -l /tmp/governance-platform-backend.zip | sed -n '1,120p'
+ls -lh /tmp/governance-platform-backend.zip
+```
+
+Why:
+
+- `unzip -l` lists the zip contents before extraction.
+- `sed -n '1,120p'` keeps the terminal output bounded.
+- `ls -lh` confirms the archive exists and shows a human-readable size.
+
+Result:
+
+- Confirmed the zip contains `pom.xml`, `mvnw`, `mvnw.cmd`, source folders, test folders, `application.properties`, and Maven Wrapper properties.
+- The archive size was about 15 KB.
+
+Interview language:
+
+> Before extracting generated code into a repo, I inspect the archive so I understand what files will be introduced.
+
+### Extract The Backend Project
+
+```bash
+mkdir -p backend
+unzip -q /tmp/governance-platform-backend.zip -d backend
+```
+
+Why:
+
+- Creates a `backend` directory for the Spring Boot application.
+- Extracts the starter project there so the repository can later also contain a separate Angular frontend.
+
+Result:
+
+- Created the first backend scaffold under `backend/`.
+
+Interview language:
+
+> I keep backend and frontend code in separate top-level folders so each application has its own build, dependencies, and runtime concerns.
+
+### Inspect The Generated Backend Files
+
+```bash
+rg --files backend | sed -n '1,160p'
+sed -n '1,240p' backend/pom.xml
+sed -n '1,160p' backend/src/main/java/com/example/governance/GovernancePlatformApplication.java
+sed -n '1,160p' backend/src/test/java/com/example/governance/GovernancePlatformApplicationTests.java
+```
+
+Why:
+
+- Lists the generated backend files.
+- Reads the Maven build configuration.
+- Reads the Spring Boot application entry point.
+- Reads the generated starter test.
+
+Result:
+
+- Spring Initializr generated a Maven project using Spring Boot 4.1.0.
+- The Maven build targets Java 21 through `<java.version>21</java.version>`.
+- The backend package is `com.example.governance`.
+- The starter test uses `@SpringBootTest` and verifies that the application context loads.
+
+Interview language:
+
+> I inspected the generated project instead of treating scaffolding as a black box. The key files are the Maven `pom.xml`, the application entry point, and the starter test.
+
+### Inspect Maven Wrapper And Configuration
+
+```bash
+sed -n '1,120p' backend/.mvn/wrapper/maven-wrapper.properties
+ls -l backend/mvnw
+sed -n '1,120p' backend/src/main/resources/application.properties
+sed -n '1,160p' backend/.gitignore
+```
+
+Why:
+
+- Checks how the Maven Wrapper is configured.
+- Confirms `mvnw` is executable.
+- Reads the initial Spring application configuration.
+- Reviews backend-specific ignored files.
+
+Result:
+
+- The Maven Wrapper uses wrapper version 3.3.4.
+- It downloads Maven 3.9.16 using `distributionType=only-script`.
+- `backend/mvnw` is executable.
+- The application name is `governance-platform`.
+- The backend `.gitignore` excludes generated build and IDE files.
+
+Interview language:
+
+> The Maven Wrapper lets the project run without a globally installed Maven command, which makes onboarding and CI more predictable.
+
+### Run The First Backend Test
+
+```bash
+./mvnw test
+```
+
+Why:
+
+- Downloads Maven and project dependencies if needed.
+- Compiles the application.
+- Runs the generated Spring Boot context-load test.
+
+Result:
+
+- Build succeeded.
+- Tests run: 1.
+- Failures: 0.
+- Errors: 0.
+- The logs showed Spring Boot 4.1.0 starting under Java 25.0.3 while compiling with Java release 21.
+- The test output included Mockito Java-agent warnings from the current JDK, but they did not fail the build.
+
+Interview language:
+
+> The first verification is a context-load test. It proves Spring can start the application with the current dependencies and configuration.
+
+### Check Git Status After Scaffolding
+
+```bash
+git status --short
+```
+
+Why:
+
+- Shows what changed before staging the scaffold.
+
+Result:
+
+- Git showed `backend/` as an untracked directory.
+
+Interview language:
+
+> I check the working tree before staging so I can confirm the checkpoint contains only the intended files.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+git status --short
+git status --short --ignored backend
+```
+
+Why:
+
+- `git diff --check` catches whitespace issues before commit.
+- `git status --short` shows the files that are modified or untracked.
+- `git status --short --ignored backend` confirms generated backend files like build output are ignored.
+
+Result:
+
+- `git diff --check` passed.
+- Git showed `docs/command-log.md` modified and `backend/` untracked.
+- Git showed `backend/HELP.md` and `backend/target/` as ignored.
+
+What that means:
+
+- The backend scaffold is ready to stage.
+- The generated build output will not be committed.
+
+Interview language:
+
+> Before committing, I verify both what will be tracked and what will stay ignored so the checkpoint contains source files, not generated output.
+
+### Stage The Phase 1.1 Files
+
+```bash
+git add backend docs/command-log.md
+```
+
+Why:
+
+- Stages the backend scaffold and the updated command log.
+- `backend/HELP.md` and `backend/target/` stay ignored because of the backend `.gitignore`.
+
+Result:
+
+- Files were staged successfully.
+- Git warned that `backend/mvnw.cmd` may use CRLF line endings when Git touches it. That is normal for the Windows Maven wrapper script.
+
+Interview language:
+
+> I stage only the intended source files and documentation, while generated files remain ignored.
+
+### Inspect The Staged Files
+
+```bash
+git diff --cached --name-only
+git status --short
+```
+
+Why:
+
+- `git diff --cached --name-only` lists exactly what will go into the commit.
+- `git status --short` shows the staged state in compact form.
+
+Result:
+
+- Confirmed the staged files are the backend wrapper, Maven build file, Spring Boot source files, application config, starter test, and `docs/command-log.md`.
+
+Interview language:
+
+> I inspect staged files before committing because a commit should represent one clear checkpoint, not accidental local output.
+
+### Commit The Phase 1.1 Checkpoint
+
+```bash
+git add docs/command-log.md
+git diff --cached --check
+git status --short
+git commit -m "chore: scaffold Spring Boot backend"
+```
+
+Why:
+
+- The first `git add` restages the command log after documenting the staging commands.
+- `git diff --cached --check` verifies staged files do not contain whitespace issues.
+- `git status --short` confirms the staged checkpoint one last time.
+- The commit records the Spring Boot backend scaffold as its own small checkpoint.
+
+Result:
+
+- The staged whitespace check passed.
+- The staged checkpoint contained the backend scaffold and `docs/command-log.md`.
+- The commit records the backend skeleton and command notes for this micro-step.
+
+Interview language:
+
+> I committed the backend scaffold separately so later business features can be reviewed independently from project setup.
