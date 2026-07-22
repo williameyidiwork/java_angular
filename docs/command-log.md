@@ -3572,3 +3572,348 @@ Result:
 Interview language:
 
 > I committed the service layer separately so the business rule can be reviewed independently from the API layer.
+
+## Step 3.4: Retention Policy REST API
+
+### Simple Definitions
+
+Controller:
+
+- A Spring object that receives HTTP requests.
+
+Request DTO:
+
+- A small object that represents JSON coming into the API.
+
+Response DTO:
+
+- A small object that controls JSON going out of the API.
+
+MockMvc:
+
+- A Spring test tool that lets tests call controllers like an HTTP client.
+
+Easy memory sentence:
+
+> Controller receives the request, service handles the rule, repository talks to the database.
+
+### Check The Starting State
+
+```bash
+git status --short
+find backend/src/main/java/com/example/governance backend/src/test/java/com/example/governance -type f | sort
+sed -n '1,220p' backend/src/main/java/com/example/governance/api/ApplicationInfoController.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/retention/RetentionPolicyService.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/retention/RetentionPolicy.java
+```
+
+Why:
+
+- Confirms Git is clean before starting.
+- Reviews the existing controller style.
+- Reviews the service that the new controller will call.
+- Reviews the entity that will be converted into the API response.
+
+Result:
+
+- Git started clean.
+- The existing API path style used `/api/v1/...`.
+- The retention service already had create and list methods.
+
+Interview language:
+
+> Before exposing the feature through HTTP, I checked the existing API style and reused the service layer instead of calling the repository directly from the controller.
+
+### Check The Spring Test Annotation
+
+```bash
+find ~/.m2/repository -path '*spring-boot-test*4.1.0*.jar' -print | sort | head -20
+find ~/.m2/repository -path '*spring-test*7*.jar' -print | sort | head -20
+find ~/.m2/repository -path '*spring-boot-webmvc-test*4.1.0*.jar' -print | sort | head -20
+jar tf ~/.m2/repository/org/springframework/boot/spring-boot-test/4.1.0/spring-boot-test-4.1.0.jar | grep -E 'MockBean|MockitoBean'
+jar tf ~/.m2/repository/org/springframework/spring-test/7.0.8/spring-test-7.0.8.jar | grep -E 'MockitoBean|MockBean'
+jar tf ~/.m2/repository/org/springframework/boot/spring-boot-webmvc-test/4.1.0/spring-boot-webmvc-test-4.1.0.jar | grep -E 'WebMvcTest|AutoConfigureMockMvc|MockMvc' | head -40
+```
+
+Why:
+
+- Confirms the correct Spring Boot 4 test package names.
+- Verifies `@MockitoBean` is available from Spring Test.
+- Verifies `@WebMvcTest` is available from Spring Boot WebMVC test support.
+
+Result:
+
+- `@MockitoBean` was found under `org.springframework.test.context.bean.override.mockito`.
+- `@WebMvcTest` was found under `org.springframework.boot.webmvc.test.autoconfigure`.
+
+Interview language:
+
+> I checked the local dependency classes so the controller test used the correct Spring Boot 4 test annotations.
+
+### Add The Request, Response, And Controller
+
+Files added:
+
+- `backend/src/main/java/com/example/governance/retention/CreateRetentionPolicyRequest.java`
+- `backend/src/main/java/com/example/governance/retention/RetentionPolicyResponse.java`
+- `backend/src/main/java/com/example/governance/retention/RetentionPolicyController.java`
+
+Endpoints added:
+
+```text
+POST /api/v1/retention-policies
+GET  /api/v1/retention-policies
+```
+
+What `POST` does:
+
+- Receives JSON.
+- Validates the JSON.
+- Calls `service.createPolicy`.
+- Returns HTTP `201 Created`.
+
+What `GET` does:
+
+- Calls `service.listPolicies`.
+- Converts each policy into a response object.
+- Returns a JSON array.
+
+Interview language:
+
+> I added REST endpoints so outside clients can create and list retention policies over HTTP.
+
+### Add Controller Tests With A Mocked Service
+
+File added:
+
+- `backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java`
+
+What the test uses:
+
+```java
+@WebMvcTest(RetentionPolicyController.class)
+class RetentionPolicyControllerTests {
+
+	@MockitoBean
+	private RetentionPolicyService service;
+}
+```
+
+Meaning:
+
+- `@WebMvcTest` loads only the web/controller slice.
+- `@MockitoBean` gives the controller a fake service.
+- The test checks HTTP behavior without starting PostgreSQL.
+
+What the tests verify:
+
+- `POST /api/v1/retention-policies` returns `201 Created`.
+- `GET /api/v1/retention-policies` returns a JSON list.
+- Invalid create requests return `400 Bad Request`.
+
+Interview language:
+
+> I used a mocked service in the controller test because I wanted to test HTTP request and response behavior, not database behavior.
+
+### Read Back The New Files
+
+```bash
+sed -n '1,180p' backend/src/main/java/com/example/governance/retention/CreateRetentionPolicyRequest.java
+sed -n '1,240p' backend/src/main/java/com/example/governance/retention/RetentionPolicyController.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/retention/RetentionPolicyResponse.java
+sed -n '1,280p' backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java
+git status --short
+```
+
+Why:
+
+- Reviews the new API files before running tests.
+- Confirms Git sees only the new API files.
+
+Result:
+
+- Verified the request DTO, response DTO, controller, and controller test.
+- Git showed four new untracked files.
+
+Interview language:
+
+> I read the new API files back before testing so the change set stayed easy to review.
+
+### Run Only The Controller Test
+
+```bash
+cd backend
+./mvnw -Dtest=RetentionPolicyControllerTests test
+```
+
+Why:
+
+- Runs only the new controller test.
+- Does not require PostgreSQL because the service is mocked.
+
+Result:
+
+- Build succeeded.
+- Tests run: 3.
+- Failures: 0.
+- Errors: 0.
+
+Note:
+
+- The validation warning is expected from the bad-request test.
+- It proves invalid JSON input returns HTTP `400`.
+
+Interview language:
+
+> I first ran the controller test alone because web-layer tests should be able to verify HTTP behavior without a real database.
+
+### Start PostgreSQL For The Full Test Suite
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+```
+
+Why:
+
+- Starts PostgreSQL for the existing database and repository integration tests.
+- Confirms the database is accepting connections before Maven runs all tests.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` reported that PostgreSQL was accepting connections.
+
+Interview language:
+
+> The controller test uses a mocked service, but the full backend suite still needs PostgreSQL because other tests verify real database integration.
+
+### Run The Full Backend Test Suite
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Runs all backend tests together.
+- Confirms the new REST API works with the rest of the application.
+
+Result:
+
+- Build succeeded.
+- Tests run: 16.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I ran the full test suite after the focused controller test so the new API layer did not break existing persistence and service behavior.
+
+### Verify Database State After Tests
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select count(*) as retention_policy_count from retention_policies;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+```
+
+Why:
+
+- Confirms test cleanup left no retention policy rows behind.
+- Confirms Flyway still shows the successful version 1 migration.
+- Confirms PostgreSQL is healthy before stopping it.
+
+Result:
+
+- `retention_policies` contained `0` rows after tests.
+- Flyway showed version `1`, description `create records schema`, success `true`.
+- PostgreSQL was healthy.
+
+Interview language:
+
+> After running tests that touch the real database, I verified cleanup and migration history.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops PostgreSQL after verification.
+- Removes the container and Compose network.
+- Preserves the named database volume.
+
+Result:
+
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> I stop local infrastructure after testing so no unused service keeps running.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- Checks for whitespace problems.
+- Confirms Docker Compose has no running services.
+- Shows the files changed by this phase.
+- Gives a compact summary of tracked changes.
+
+Result:
+
+- Whitespace check passed.
+- No Compose services were running.
+- `git status --short` showed the command log update and four new REST API files.
+- `git diff --stat` showed the tracked command log change; the new Java files remained untracked until staging.
+
+Interview language:
+
+> Before committing, I verify formatting, local infrastructure state, and the exact diff.
+
+### Stage And Commit The Phase
+
+```bash
+git add backend/src/main/java/com/example/governance/retention/CreateRetentionPolicyRequest.java backend/src/main/java/com/example/governance/retention/RetentionPolicyController.java backend/src/main/java/com/example/governance/retention/RetentionPolicyResponse.java backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+git diff --cached --stat
+git add docs/command-log.md
+git commit -m "feat: add retention policy API"
+```
+
+Why:
+
+- Stages only the REST API files and command log.
+- Reviews staged files before committing.
+- Creates a focused checkpoint before adding richer API error handling.
+
+Result:
+
+- Staged files were:
+  - `backend/src/main/java/com/example/governance/retention/CreateRetentionPolicyRequest.java`
+  - `backend/src/main/java/com/example/governance/retention/RetentionPolicyController.java`
+  - `backend/src/main/java/com/example/governance/retention/RetentionPolicyResponse.java`
+  - `backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java`
+  - `docs/command-log.md`
+- Staged whitespace check passed.
+- `git diff --cached --stat` summarized five staged files.
+- The extra `git add docs/command-log.md` restages this log after recording the staged-file inspection.
+
+Interview language:
+
+> I committed the REST API separately so the HTTP layer can be reviewed independently from persistence and business rules.
