@@ -2637,3 +2637,269 @@ Result:
 Interview language:
 
 > I stopped PostgreSQL after testing so no background service continued using local port 5432.
+
+## Step 3.1: First Flyway Schema Migration
+
+### Check The Starting State
+
+```bash
+git status --short
+docker compose ps
+find backend/src/main/resources backend/src/test/java -type f | sort
+sed -n '1,120p' backend/src/main/resources/application.properties
+```
+
+Why:
+
+- Confirms the working tree is clean before adding schema files.
+- Checks whether PostgreSQL is already running.
+- Lists the current backend resource and test files.
+- Reviews the datasource and Flyway configuration before adding a migration.
+
+Result:
+
+- Git started clean.
+- PostgreSQL was not running at first.
+- The backend already had `application.properties`, a migration folder marker, and the earlier database test.
+- Spring Boot was configured to use PostgreSQL, Flyway, and `spring.jpa.hibernate.ddl-auto=validate`.
+
+Interview language:
+
+> Before creating database tables, I checked the current project state and confirmed that Flyway was already enabled as the database migration tool.
+
+### Add The Migration File
+
+File added:
+
+- `backend/src/main/resources/db/migration/V1__create_records_schema.sql`
+
+File removed:
+
+- `backend/src/main/resources/db/migration/.gitkeep`
+
+Why:
+
+- Flyway looks for migration files under `db/migration` by default.
+- The filename `V1__create_records_schema.sql` means version `1`, followed by a description.
+- The `.gitkeep` placeholder is no longer needed once the folder contains a real migration.
+
+Schema created:
+
+- `retention_policies`
+- `records`
+
+Important constraints:
+
+- Primary keys use PostgreSQL `uuid` values.
+- `retention_policies.name` is unique.
+- `records.external_id` is unique.
+- `records.retention_policy_id` is a foreign key to `retention_policies.id`.
+- `records.status` is limited to `ACTIVE`, `ARCHIVED`, `PURGED`, or `FAILED`.
+- Retention policy days must be positive.
+
+Interview language:
+
+> I used Flyway migrations so database structure is versioned in source control and applied consistently across local, test, and future cloud environments.
+
+### Add A JUnit Schema Verification Test
+
+File added:
+
+- `backend/src/test/java/com/example/governance/database/DatabaseSchemaTests.java`
+
+What the test verifies:
+
+- Flyway created `flyway_schema_history`.
+- Flyway created the `records` table.
+- Flyway created the `retention_policies` table.
+- PostgreSQL contains the `chk_records_status` check constraint.
+- PostgreSQL contains the `fk_records_retention_policy` foreign key.
+
+Why:
+
+- This is another integration test because it validates the real database schema.
+- It catches mistakes like a missing table, renamed constraint, or failed migration.
+
+Interview language:
+
+> I added an integration test around the schema because a migration is only useful if the application can apply it to the actual database successfully.
+
+### Read Back The New Files
+
+```bash
+sed -n '1,220p' backend/src/main/resources/db/migration/V1__create_records_schema.sql
+sed -n '1,220p' backend/src/test/java/com/example/governance/database/DatabaseSchemaTests.java
+```
+
+Why:
+
+- Reads the migration and test files back in the terminal before running them.
+
+Result:
+
+- Confirmed the SQL migration and JUnit test were written as expected.
+
+Interview language:
+
+> I read new files back before testing so obvious content problems are caught early.
+
+### Start PostgreSQL
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+```
+
+Why:
+
+- Starts the real PostgreSQL dependency required by the integration tests.
+- Checks that PostgreSQL is ready before Maven runs the Spring test context.
+- Confirms the Compose service is healthy.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` reported that the database was accepting connections.
+
+Interview language:
+
+> Because the schema test uses a real database, I started PostgreSQL first and verified readiness before running the backend test suite.
+
+### Run The Backend Tests
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Runs the Spring Boot test suite.
+- Lets Flyway apply the migration during application context startup.
+- Proves the schema migration works with the real PostgreSQL database.
+
+Result:
+
+- Build succeeded.
+- Tests run: 8.
+- Failures: 0.
+- Errors: 0.
+- Flyway applied version `1 - create records schema`.
+
+Interview language:
+
+> The test run proved that Spring Boot can start, connect to PostgreSQL, apply the Flyway migration, and validate the resulting schema.
+
+### Inspect The Database Directly
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c '\dt'
+docker compose exec -T postgres psql -U governance -d governance -c "select table_name from information_schema.tables where table_schema = 'public' order by table_name;"
+docker compose exec -T postgres psql -U governance -d governance -c "select table_name, constraint_name, constraint_type from information_schema.table_constraints where table_schema = 'public' and table_name in ('records', 'retention_policies') order by table_name, constraint_name;"
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+```
+
+Why:
+
+- Uses `psql` inside the PostgreSQL container to inspect the real database.
+- `\dt` lists database tables.
+- `information_schema.tables` lists table metadata using SQL.
+- `information_schema.table_constraints` lists constraints.
+- The row count query confirms that the tables exist but do not contain business data yet.
+- `flyway_schema_history` confirms which migrations have been applied.
+
+Result:
+
+- Tables present:
+  - `flyway_schema_history`
+  - `records`
+  - `retention_policies`
+- `records` and `retention_policies` both had `0` rows.
+- Flyway showed migration version `1`, description `create records schema`, success `true`.
+
+Interview language:
+
+> I verified the migration in two ways: through automated JUnit tests and through direct PostgreSQL metadata queries.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops the local database after verification.
+- Removes the container and Compose network.
+- Preserves the named database volume.
+
+Result:
+
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> I stopped the local service after verification so the project does not leave background containers running unnecessarily.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- Checks for whitespace problems.
+- Confirms no Compose services are still running.
+- Shows the files changed by this phase.
+- Gives a compact summary of the schema/test/documentation changes.
+
+Result:
+
+- Whitespace check passes.
+- No Compose services were running.
+- `git status --short` showed the removed `.gitkeep`, the updated command log, the new migration file, and the new schema test.
+- `git diff --stat` summarized tracked changes only, which is why the untracked migration and test files appeared in `git status` but not yet in the diff stat.
+
+Interview language:
+
+> Before committing, I verify formatting, runtime cleanup, and the exact source-control diff.
+
+### Stage And Commit The Phase
+
+```bash
+git add backend/src/main/resources/db/migration/.gitkeep backend/src/main/resources/db/migration/V1__create_records_schema.sql backend/src/test/java/com/example/governance/database/DatabaseSchemaTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+git diff --cached --stat
+git add docs/command-log.md
+git commit -m "feat: add initial records schema migration"
+```
+
+Why:
+
+- Stages only the files related to the first schema migration.
+- Reviews staged files before committing.
+- Creates a focused checkpoint for the schema phase.
+
+Result:
+
+- Staged files were:
+  - `backend/src/main/resources/db/migration/.gitkeep`
+  - `backend/src/main/resources/db/migration/V1__create_records_schema.sql`
+  - `backend/src/test/java/com/example/governance/database/DatabaseSchemaTests.java`
+  - `docs/command-log.md`
+- Staged whitespace check passed.
+- `git status --short` showed the placeholder deletion, migration addition, schema test addition, and command log update staged for commit.
+- `git diff --cached --stat` summarized four staged files.
+- The extra `git add docs/command-log.md` restages this log after recording the staged-file inspection.
+
+Interview language:
+
+> I committed the schema migration as its own checkpoint so the database structure can be reviewed independently from the upcoming API code.
