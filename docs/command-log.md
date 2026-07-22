@@ -3249,3 +3249,326 @@ Result:
 Interview language:
 
 > I committed the persistence layer separately from the REST API so the data-access foundation can be reviewed and understood independently.
+
+## Step 3.3: Retention Policy Service Layer
+
+### Simple Definitions
+
+Repository:
+
+- A Spring object that talks to the database for one entity.
+
+Service:
+
+- A Spring object that holds business rules before or after database work.
+
+Mock:
+
+- A fake object used in a unit test.
+- In this phase, the repository is mocked so the service can be tested without PostgreSQL.
+
+Unit test:
+
+- Tests one class in isolation.
+
+Integration test:
+
+- Tests multiple real pieces together, such as Spring Boot plus PostgreSQL.
+
+Interview language:
+
+> I added a service layer so business rules do not live directly in controllers or repositories.
+
+### Check The Starting State
+
+```bash
+git status --short
+find backend/src/main/java/com/example/governance backend/src/test/java/com/example/governance -type f | sort
+sed -n '1,220p' backend/src/main/java/com/example/governance/retention/RetentionPolicy.java
+sed -n '1,120p' backend/src/main/java/com/example/governance/retention/RetentionPolicyRepository.java
+sed -n '1,220p' backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java
+```
+
+Why:
+
+- Confirms the repository is clean.
+- Lists the current Java files.
+- Reviews the entity, repository, and repository integration test before adding the service.
+
+Result:
+
+- Git started clean.
+- The retention package already had the entity and repository.
+- The repository already had `findByName`.
+
+Interview language:
+
+> I checked the existing persistence code before adding the service so the next layer uses the repository correctly.
+
+### Add The Service And Exception
+
+Files added:
+
+- `backend/src/main/java/com/example/governance/retention/DuplicateRetentionPolicyException.java`
+- `backend/src/main/java/com/example/governance/retention/RetentionPolicyService.java`
+
+What the service does:
+
+- Checks whether a policy name already exists.
+- Throws `DuplicateRetentionPolicyException` if the name exists.
+- Saves a new `RetentionPolicy` if the name is available.
+- Lists policies sorted by name.
+
+Important code:
+
+```java
+repository.findByName(name)
+		.ifPresent(existing -> {
+			throw new DuplicateRetentionPolicyException(name);
+		});
+```
+
+Meaning:
+
+- Ask the repository if this name exists.
+- If it exists, stop and throw an exception.
+- If it does not exist, continue and save.
+
+Interview language:
+
+> The service is where I put business rules like duplicate-name checks, while the repository remains focused on database access.
+
+### Add A Mocked Service Unit Test
+
+File added:
+
+- `backend/src/test/java/com/example/governance/retention/RetentionPolicyServiceTests.java`
+
+What the test uses:
+
+```java
+@Mock
+private RetentionPolicyRepository repository;
+
+@InjectMocks
+private RetentionPolicyService service;
+```
+
+Meaning:
+
+- `@Mock` creates a fake repository.
+- `@InjectMocks` creates the real service and gives it the fake repository.
+- The test controls what the fake repository returns.
+
+What the tests verify:
+
+- A policy is saved when the name does not exist.
+- A duplicate policy name throws `DuplicateRetentionPolicyException`.
+- The service does not call `save` when the name is duplicated.
+- Policies are listed by name.
+
+Interview language:
+
+> I used a mocked repository in the service unit test because I only wanted to test the service decision logic, not the database.
+
+### Read Back The New Files
+
+```bash
+sed -n '1,120p' backend/src/main/java/com/example/governance/retention/DuplicateRetentionPolicyException.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/retention/RetentionPolicyService.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/retention/RetentionPolicyServiceTests.java
+git status --short
+```
+
+Why:
+
+- Reviews the new service, exception, and test files.
+- Confirms Git sees only the three new files.
+
+Result:
+
+- Verified the new service-layer files.
+- Git showed three untracked files.
+
+Interview language:
+
+> I read the files back and checked Git status before running tests so the change set stayed small.
+
+### Run Only The Service Unit Test
+
+```bash
+cd backend
+./mvnw -Dtest=RetentionPolicyServiceTests test
+```
+
+Why:
+
+- Runs only the new service unit test.
+- Does not require PostgreSQL because the repository is mocked.
+
+Result:
+
+- Build succeeded.
+- Tests run: 3.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I first ran the service test alone because mocked unit tests should be fast and independent from external services.
+
+### Start PostgreSQL For The Full Test Suite
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+```
+
+Why:
+
+- Starts PostgreSQL for the existing database and repository integration tests.
+- Confirms the database is accepting connections.
+- Confirms the container is healthy.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` reported that it was accepting connections.
+- Docker Compose showed PostgreSQL as healthy.
+
+Interview language:
+
+> I only started PostgreSQL for the full suite because some tests are real database integration tests.
+
+### Run The Full Backend Test Suite
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Runs every backend test.
+- Confirms the new service unit test works with the existing database integration tests.
+
+Result:
+
+- Build succeeded.
+- Tests run: 13.
+- Failures: 0.
+- Errors: 0.
+
+Note:
+
+- The duplicate-key warning is expected from the repository integration test.
+- That test intentionally proves PostgreSQL rejects duplicate retention policy names.
+
+Interview language:
+
+> I ran both focused unit tests and the full test suite so the new service rule is verified by itself and the whole backend still works.
+
+### Verify Database State After Tests
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select count(*) as retention_policy_count from retention_policies;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+```
+
+Why:
+
+- Confirms the test suite left no business rows behind.
+- Confirms Flyway still shows the successful version 1 migration.
+- Confirms PostgreSQL is healthy before stopping it.
+
+Result:
+
+- `retention_policies` contained `0` rows after tests.
+- Flyway showed version `1`, description `create records schema`, success `true`.
+- PostgreSQL was healthy.
+
+Interview language:
+
+> After tests that touch a real database, I verify cleanup so future test runs start from a predictable state.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops PostgreSQL after verification.
+- Removes the container and Compose network.
+- Preserves the named database volume.
+
+Result:
+
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> I stop local infrastructure after testing so no unused service keeps running.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- Checks for whitespace problems.
+- Confirms Docker Compose has no running services.
+- Shows the files changed by this phase.
+- Gives a compact summary of tracked changes.
+
+Result:
+
+- Whitespace check passed.
+- No Compose services were running.
+- `git status --short` showed the command log update and three new service-layer files.
+- `git diff --stat` showed the tracked command log change; the new Java files remained untracked until staging.
+
+Interview language:
+
+> Before committing, I verify formatting, local infrastructure state, and the exact diff.
+
+### Stage And Commit The Phase
+
+```bash
+git add backend/src/main/java/com/example/governance/retention/DuplicateRetentionPolicyException.java backend/src/main/java/com/example/governance/retention/RetentionPolicyService.java backend/src/test/java/com/example/governance/retention/RetentionPolicyServiceTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+git diff --cached --stat
+git add docs/command-log.md
+git commit -m "feat: add retention policy service"
+```
+
+Why:
+
+- Stages only the service-layer files and command log.
+- Reviews staged files before committing.
+- Creates a focused checkpoint before adding REST API endpoints.
+
+Result:
+
+- Staged files were:
+  - `backend/src/main/java/com/example/governance/retention/DuplicateRetentionPolicyException.java`
+  - `backend/src/main/java/com/example/governance/retention/RetentionPolicyService.java`
+  - `backend/src/test/java/com/example/governance/retention/RetentionPolicyServiceTests.java`
+  - `docs/command-log.md`
+- Staged whitespace check passed.
+- `git diff --cached --stat` summarized four staged files.
+- The extra `git add docs/command-log.md` restages this log after recording the staged-file inspection.
+
+Interview language:
+
+> I committed the service layer separately so the business rule can be reviewed independently from the API layer.
