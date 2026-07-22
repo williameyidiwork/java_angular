@@ -2903,3 +2903,349 @@ Result:
 Interview language:
 
 > I committed the schema migration as its own checkpoint so the database structure can be reviewed independently from the upcoming API code.
+
+## Step 3.2: First JPA Entity And Repository
+
+### Check The Starting State
+
+```bash
+git status --short
+find backend/src/main/java backend/src/test/java backend/src/main/resources -type f | sort
+sed -n '1,240p' backend/pom.xml
+sed -n '1,180p' backend/src/main/resources/application.properties
+sed -n '1,220p' backend/src/test/java/com/example/governance/database/DatabaseSchemaTests.java
+```
+
+Why:
+
+- Confirms the repository is clean before starting.
+- Lists the current backend source, test, and resource files.
+- Confirms Spring Data JPA is already available in Maven.
+- Reviews `spring.jpa.hibernate.ddl-auto=validate`.
+- Reviews the schema test that proves the database tables already exist.
+
+Result:
+
+- Git started clean.
+- The backend already had JPA and Flyway dependencies.
+- The application was configured to validate schema instead of generating schema.
+- The database schema migration already created `retention_policies`.
+
+Interview language:
+
+> Before adding persistence code, I verified that the schema exists through Flyway and that Hibernate is configured to validate mappings instead of changing the database automatically.
+
+### Create The Retention Package Folders
+
+```bash
+mkdir -p backend/src/main/java/com/example/governance/retention backend/src/test/java/com/example/governance/retention
+```
+
+Why:
+
+- Creates a focused package for retention-policy persistence code.
+- Keeps domain code separate from generic database tests and API controllers.
+
+Result:
+
+- Added folders for main code and tests under `com.example.governance.retention`.
+
+Interview language:
+
+> I organized the persistence code by domain area so retention-policy logic has a clear home as the application grows.
+
+### Add The JPA Entity
+
+File added:
+
+- `backend/src/main/java/com/example/governance/retention/RetentionPolicy.java`
+
+What it does:
+
+- Maps the Java class `RetentionPolicy` to the PostgreSQL table `retention_policies`.
+- Uses `@Entity` to tell JPA this class is persisted.
+- Uses `@Table(name = "retention_policies")` to match the real table name.
+- Uses `@Id` and `@GeneratedValue(strategy = GenerationType.UUID)` for the primary key.
+- Maps `retentionPeriodDays` to the database column `retention_period_days`.
+- Uses validation annotations like `@NotBlank`, `@Size`, `@NotNull`, and `@Positive`.
+- Keeps `createdAt` and `updatedAt` read-only from JPA inserts so the database defaults can set them.
+
+Why:
+
+- JPA entities are the Java representation of database rows.
+- The entity must match the Flyway-created table because Hibernate is set to `validate`.
+
+Interview language:
+
+> I mapped the Flyway-managed table to a JPA entity so the application can work with retention policies as Java objects while the database remains the source of truth for schema.
+
+### Add The Spring Data Repository
+
+File added:
+
+- `backend/src/main/java/com/example/governance/retention/RetentionPolicyRepository.java`
+
+What it does:
+
+```java
+public interface RetentionPolicyRepository extends JpaRepository<RetentionPolicy, UUID> {
+
+	Optional<RetentionPolicy> findByName(String name);
+}
+```
+
+Why:
+
+- `JpaRepository` gives standard CRUD operations like save, find by id, find all, and delete.
+- `findByName` is a derived query method.
+- Spring Data reads the method name and creates the SQL query implementation at runtime.
+
+Interview language:
+
+> I used Spring Data JPA to avoid writing boilerplate SQL for basic persistence while still keeping database rules enforced by PostgreSQL.
+
+### Add Repository Integration Tests
+
+File added:
+
+- `backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java`
+
+What the tests verify:
+
+- A retention policy can be saved through the repository.
+- A saved policy can be found by name.
+- The database generates or receives a UUID primary key.
+- PostgreSQL rejects duplicate policy names through the unique constraint.
+- Test cleanup removes rows before and after each test.
+
+Why:
+
+- This test verifies the real connection between Spring Data JPA, Hibernate, Flyway, and PostgreSQL.
+- A mock repository would not prove the entity mapping or database constraint works.
+
+Interview language:
+
+> I wrote a repository integration test because persistence code crosses an infrastructure boundary; I want proof that the Java mapping and real database schema work together.
+
+### Read Back The New Files
+
+```bash
+sed -n '1,240p' backend/src/main/java/com/example/governance/retention/RetentionPolicy.java
+sed -n '1,160p' backend/src/main/java/com/example/governance/retention/RetentionPolicyRepository.java
+sed -n '1,240p' backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java
+git status --short
+```
+
+Why:
+
+- Reviews the files in the terminal before running tests.
+- Confirms Git sees only the new retention package files.
+
+Result:
+
+- Verified the entity, repository, and repository test contents.
+- Git showed new files under the retention package.
+
+Interview language:
+
+> I read the new files back and checked Git status before testing so I could confirm the change set stayed focused.
+
+### Start PostgreSQL
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+```
+
+Why:
+
+- Starts the real PostgreSQL database required by the repository integration test.
+- Confirms PostgreSQL is accepting connections before Maven starts the Spring context.
+- Confirms the container status.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` reported that the database was accepting connections.
+
+Interview language:
+
+> Because this repository test talks to a real database, I start PostgreSQL and verify readiness before running Maven.
+
+### Run The Backend Tests
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Compiles the new entity and repository.
+- Starts the Spring test context.
+- Lets Flyway validate the migration history.
+- Lets Hibernate validate the entity mapping against the PostgreSQL schema.
+- Runs the new repository integration tests.
+
+Result:
+
+- Build succeeded.
+- Tests run: 10.
+- Failures: 0.
+- Errors: 0.
+- Spring Data found `1` JPA repository interface.
+
+Note:
+
+- The duplicate-name test intentionally triggers a PostgreSQL unique constraint violation.
+- Hibernate logs a duplicate-key warning during that test.
+- The warning is expected because the test asserts that PostgreSQL rejects duplicate retention policy names.
+
+Interview language:
+
+> The test suite proves the persistence layer works end to end: Spring Data creates the repository, Hibernate validates the entity mapping, and PostgreSQL enforces the unique constraint.
+
+### Improve Test Cleanup
+
+File updated:
+
+- `backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java`
+
+Change:
+
+```java
+@BeforeEach
+@AfterEach
+void cleanTables() {
+	jdbcTemplate.update("delete from records");
+	jdbcTemplate.update("delete from retention_policies");
+}
+```
+
+Why:
+
+- The duplicate-name test intentionally inserts a row before checking the constraint.
+- Cleaning before and after each test keeps the local database repeatable.
+
+Command:
+
+```bash
+cd backend
+./mvnw test
+```
+
+Result:
+
+- Build still succeeded.
+- Tests run: 10.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I added cleanup around the integration test so test data does not leak into later tests or local development.
+
+### Verify Database State After Tests
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select count(*) as retention_policy_count from retention_policies;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+```
+
+Why:
+
+- Confirms the repository test cleanup left no business rows behind.
+- Confirms Flyway still shows only the successful version 1 migration.
+- Confirms PostgreSQL is still healthy before shutting it down.
+
+Result:
+
+- `retention_policies` contained `0` rows after the tests.
+- Flyway still showed version `1`, description `create records schema`, success `true`.
+- PostgreSQL was healthy.
+
+Interview language:
+
+> After integration tests write to a real database, I verify cleanup so the test environment remains deterministic.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops the database after the repository verification.
+- Removes the container and Compose network.
+- Preserves the named database volume.
+
+Result:
+
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> I stop local infrastructure after verification so the development environment does not leave unused services running.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- Checks for whitespace problems.
+- Confirms no Compose services are running.
+- Shows the files changed by the persistence phase.
+- Gives a compact summary of the diff.
+
+Result:
+
+- Whitespace check passed.
+- No Compose services were running.
+- `git status --short` showed the command log update and new retention package files.
+- `git diff --stat` showed the tracked command log change; the new Java files remained untracked until staging.
+
+Interview language:
+
+> Before committing, I verify formatting, runtime cleanup, and the exact source-control diff.
+
+### Stage And Commit The Phase
+
+```bash
+git add backend/src/main/java/com/example/governance/retention/RetentionPolicy.java backend/src/main/java/com/example/governance/retention/RetentionPolicyRepository.java backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+git diff --cached --stat
+git add docs/command-log.md
+git commit -m "feat: add retention policy persistence"
+```
+
+Why:
+
+- Stages only the files related to the retention-policy persistence layer.
+- Reviews staged files before committing.
+- Creates a focused checkpoint before adding service or REST API code.
+
+Result:
+
+- Staged files were:
+  - `backend/src/main/java/com/example/governance/retention/RetentionPolicy.java`
+  - `backend/src/main/java/com/example/governance/retention/RetentionPolicyRepository.java`
+  - `backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java`
+  - `docs/command-log.md`
+- Staged whitespace check passed.
+- `git diff --cached --stat` summarized four staged files.
+- The extra `git add docs/command-log.md` restages this log after recording the staged-file inspection.
+
+Interview language:
+
+> I committed the persistence layer separately from the REST API so the data-access foundation can be reviewed and understood independently.
