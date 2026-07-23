@@ -4599,3 +4599,431 @@ Result:
 Interview language:
 
 > I committed API error handling separately so the error contract can be reviewed independently from future business features.
+
+## Step 4.1: Records API Feature Slice
+
+This step builds phases 1 to 8 of the records feature in one larger checkpoint, but the code is still organized as small layers so it can be studied one piece at a time.
+
+### Phase Map
+
+1. Add record status values.
+2. Add the record database entity.
+3. Add the record repository.
+4. Add repository integration tests against PostgreSQL.
+5. Add the record service.
+6. Add service unit tests with Mockito.
+7. Add request and response DTOs.
+8. Add the REST controller, error handling, and controller tests.
+
+Interview language:
+
+> I built the records feature vertically, from database mapping to repository, service, API contract, and tests.
+
+### Official References Used
+
+- Spring Data JPA repository core concepts: https://docs.spring.io/spring-data/jpa/reference/repositories/core-concepts.html
+- Spring Data JPA query methods: https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html
+- Spring MVC request mapping: https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html
+- Spring Bean Validation integration: https://docs.spring.io/spring-framework/reference/core/validation/beanvalidation.html
+- Spring MockMvc testing: https://docs.spring.io/spring-framework/reference/testing/mockmvc.html
+- Jakarta Persistence `@Entity`: https://jakarta.ee/specifications/platform/11/apidocs/jakarta/persistence/entity
+- Jakarta Persistence `@ManyToOne`: https://jakarta.ee/specifications/persistence/3.2/apidocs/jakarta.persistence/jakarta/persistence/manytoone
+- Jakarta Persistence enum mapping: https://jakarta.ee/specifications/persistence/3.2/apidocs/jakarta.persistence/jakarta/persistence/enumtype
+
+### Inspect The Current Backend
+
+```bash
+git status --short
+find backend/src/main/java/com/example/governance backend/src/test/java/com/example/governance backend/src/main/resources -type f
+sed -n '1,220p' backend/src/main/resources/db/migration/V1__create_records_schema.sql
+sed -n '1,240p' backend/src/main/java/com/example/governance/retention/RetentionPolicy.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/retention/RetentionPolicyService.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/retention/RetentionPolicyController.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java
+sed -n '1,280p' backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java
+sed -n '1,240p' backend/src/test/java/com/example/governance/retention/RetentionPolicyServiceTests.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryIT.java
+```
+
+Why:
+
+- Confirms the working tree before editing.
+- Uses `find` instead of `rg` because this machine does not currently have `rg` available.
+- Reads the retention feature first so the records feature follows the same style.
+
+Result:
+
+- Confirmed the existing Flyway migration already has a `records` table.
+- Confirmed retention already has the same controller, service, repository, and test pattern we can reuse.
+
+Interview language:
+
+> I inspected the existing code before adding records so the new feature matched the application's current structure.
+
+### Create The Records Package
+
+```bash
+mkdir -p backend/src/main/java/com/example/governance/records backend/src/test/java/com/example/governance/records
+```
+
+Why:
+
+- Creates a focused package for the records domain.
+- Keeps production code and test code in matching package paths.
+
+Result:
+
+- Created the records source and test directories.
+
+Interview language:
+
+> I grouped the records code by feature so related domain code stays easy to find.
+
+### Add Record Domain And Persistence Files
+
+Files added:
+
+- `backend/src/main/java/com/example/governance/records/RecordStatus.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecord.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java`
+
+What each file does:
+
+- `RecordStatus` lists allowed lifecycle states: `ACTIVE`, `ARCHIVED`, `PURGED`, and `FAILED`.
+- `GovernanceRecord` maps the `records` table to a Java object.
+- `GovernanceRecordRepository` gives Spring Data JPA the database access interface.
+- `GovernanceRecordRepositoryIT` proves the repository works with real PostgreSQL.
+
+Important annotations and APIs:
+
+```java
+@Entity
+@Table(name = "records")
+@Enumerated(EnumType.STRING)
+@ManyToOne(fetch = FetchType.LAZY)
+public interface GovernanceRecordRepository extends JpaRepository<GovernanceRecord, UUID>
+Optional<GovernanceRecord> findByExternalId(String externalId)
+```
+
+Why:
+
+- `@Entity` tells JPA this Java class is stored in a database table.
+- `@Enumerated(EnumType.STRING)` stores enum names like `ACTIVE`, which is more readable than storing numbers.
+- `@ManyToOne` models that many records can share one retention policy.
+- `JpaRepository` gives common database methods such as `save`, `findAll`, and `findById`.
+- `findByExternalId` is a Spring Data query method; Spring builds the query from the method name.
+
+Interview language:
+
+> I used a JPA entity for the database mapping and a Spring Data repository so the application can persist records without hand-writing common CRUD SQL.
+
+### Add Record Service And Unit Tests
+
+Files added:
+
+- `backend/src/main/java/com/example/governance/records/DuplicateRecordException.java`
+- `backend/src/main/java/com/example/governance/records/RetentionPolicyNotFoundException.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordService.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java`
+
+What the service does:
+
+- Creates records as `ACTIVE`.
+- Rejects duplicate `externalId` values.
+- Allows records without a retention policy.
+- Rejects a retention policy ID that does not exist.
+- Lists records sorted by `externalId`.
+
+Why:
+
+- The service is where business rules live.
+- The controller should not decide business rules.
+- The repository should not decide business rules.
+- Unit tests use fake repositories so the service rules can be tested without PostgreSQL.
+
+Interview language:
+
+> I put business decisions in the service layer and used unit tests to verify those decisions without needing infrastructure.
+
+### Add Record API Contract
+
+Files added:
+
+- `backend/src/main/java/com/example/governance/records/CreateRecordRequest.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordController.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java`
+
+File updated:
+
+- `backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java`
+
+Endpoints added:
+
+```text
+POST /api/v1/records
+GET /api/v1/records
+```
+
+Important annotations and APIs:
+
+```java
+@RestController
+@RequestMapping("/api/v1/records")
+@PostMapping
+@GetMapping
+@Valid
+@RequestBody
+@WebMvcTest(GovernanceRecordController.class)
+MockMvc
+jsonPath(...)
+```
+
+Why:
+
+- Request DTOs protect the API from exposing database entities directly.
+- Response DTOs control exactly what JSON clients receive.
+- `@Valid` activates validation annotations like `@NotBlank`.
+- `MockMvc` tests controller behavior without starting a real server.
+- The global exception handler converts service exceptions into clear HTTP errors.
+
+Interview language:
+
+> I separated API DTOs from database entities and tested the controller as an HTTP contract.
+
+### Add Study Comments To Source Code
+
+Files commented:
+
+- `backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java`
+- `backend/src/main/java/com/example/governance/records/CreateRecordRequest.java`
+- `backend/src/main/java/com/example/governance/records/DuplicateRecordException.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecord.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordController.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordService.java`
+- `backend/src/main/java/com/example/governance/records/RecordStatus.java`
+- `backend/src/main/java/com/example/governance/records/RetentionPolicyNotFoundException.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java`
+
+Why:
+
+- Comments explain the purpose of each layer in plain language.
+- Comments are placed near the code they explain.
+- Comments focus on interview concepts: API contract, business rules, repositories, database constraints, and test type.
+
+Interview language:
+
+> I added comments that explain the intent of the code, especially around the boundaries between controller, service, repository, and database tests.
+
+### Read Back The New Records Files
+
+```bash
+find backend/src/main/java/com/example/governance/records backend/src/test/java/com/example/governance/records -type f
+sed -n '1,280p' backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecord.java
+sed -n '1,240p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java
+sed -n '1,180p' backend/src/main/java/com/example/governance/records/CreateRecordRequest.java
+sed -n '1,180p' backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java
+sed -n '1,160p' backend/src/main/java/com/example/governance/records/RecordStatus.java
+sed -n '1,120p' backend/src/main/java/com/example/governance/records/DuplicateRecordException.java
+sed -n '1,120p' backend/src/main/java/com/example/governance/records/RetentionPolicyNotFoundException.java
+sed -n '1,320p' backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java
+sed -n '1,320p' backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java
+```
+
+Why:
+
+- Reads source files through the terminal after editing.
+- Confirms the comments and code are present before test execution.
+
+Result:
+
+- Verified the new records files and the updated global exception handler.
+
+Interview language:
+
+> I read the files back after editing so I could verify the implementation before running tests.
+
+### Run Focused Records Tests
+
+```bash
+cd backend
+./mvnw -Dtest=GovernanceRecordServiceTests,GovernanceRecordControllerTests test
+```
+
+Why:
+
+- Runs only the fast records service and controller tests.
+- Avoids PostgreSQL while checking business logic and API behavior.
+
+Result:
+
+- Build succeeded.
+- Tests run: 10.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I first ran focused tests for the new feature so feedback was fast and easy to understand.
+
+### Run Fast Backend Tests
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Runs every `*Tests` class.
+- Confirms the new records feature did not break existing fast tests.
+
+Result:
+
+- Build succeeded.
+- Tests run: 20.
+- Failures: 0.
+- Errors: 0.
+
+After the comment-only pass, the same command was run again:
+
+```bash
+cd backend
+./mvnw test
+```
+
+Result:
+
+- Build succeeded.
+- Tests run: 20.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I ran the fast test suite after adding the feature and again after the comment pass to keep the checkpoint clean.
+
+### Run Full Verification With PostgreSQL
+
+```bash
+cd backend
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+./mvnw verify
+```
+
+Why:
+
+- Starts the real PostgreSQL database.
+- Confirms PostgreSQL is accepting connections.
+- Runs fast tests with Surefire.
+- Runs integration tests with Failsafe.
+
+Result:
+
+- PostgreSQL started successfully and was healthy.
+- Surefire ran 20 fast tests.
+- Failsafe ran 10 integration tests.
+- Build succeeded.
+- Failures: 0.
+- Errors: 0.
+
+Note:
+
+- The duplicate-key warnings in the repository integration tests are expected because those tests intentionally prove the database rejects duplicates.
+
+Interview language:
+
+> I ran full verification with PostgreSQL because repository integration tests should prove the JPA mapping and database constraints work together.
+
+### Verify Database Cleanup
+
+```bash
+cd backend
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies order by table_name;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+docker compose down
+```
+
+Why:
+
+- Checks that integration tests did not leave business rows behind.
+- Confirms Flyway migration history is valid.
+- Stops PostgreSQL after verification.
+
+Result:
+
+- `records` row count: `0`.
+- `retention_policies` row count: `0`.
+- Flyway version `1`, description `create records schema`, success `true`.
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> I verified database cleanup after integration tests so the test suite remains repeatable.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- Checks for whitespace problems.
+- Confirms no Docker Compose services are still running.
+- Shows which files changed before staging.
+- Gives a compact tracked-file diff summary.
+
+Result:
+
+- Whitespace check passed.
+- Docker Compose showed no running services.
+- Git showed the updated API exception handler, command log, and new records packages.
+
+Interview language:
+
+> I checked formatting, local infrastructure state, and Git status before creating the checkpoint.
+
+### Stage And Commit The Records Phase
+
+```bash
+git add backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java backend/src/main/java/com/example/governance/records/CreateRecordRequest.java backend/src/main/java/com/example/governance/records/DuplicateRecordException.java backend/src/main/java/com/example/governance/records/GovernanceRecord.java backend/src/main/java/com/example/governance/records/GovernanceRecordController.java backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java backend/src/main/java/com/example/governance/records/GovernanceRecordService.java backend/src/main/java/com/example/governance/records/RecordStatus.java backend/src/main/java/com/example/governance/records/RetentionPolicyNotFoundException.java backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+git diff --cached --stat
+git add docs/command-log.md
+git commit -m "feat: add records API"
+```
+
+Why:
+
+- Stages only the records feature files and the command log.
+- Reviews the staged files before committing.
+- Restages the command log after recording the staged-file commands.
+- Creates one checkpoint for the full records API slice.
+
+Result:
+
+- Staged files: 14.
+- Staged whitespace check passed.
+- Staged diff summary: 14 files changed.
+
+Interview language:
+
+> I committed the records feature as one vertical slice because the entity, repository, service, API, and tests belong to the same user-facing capability.
