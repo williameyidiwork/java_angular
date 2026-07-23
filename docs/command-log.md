@@ -4291,3 +4291,311 @@ Result:
 Interview language:
 
 > I committed the test separation as its own checkpoint because it changes how developers run and reason about the test suite.
+
+## Step 3.6: Structured API Error Responses
+
+### Simple Definitions
+
+API error response:
+
+- The JSON body returned when something goes wrong in the API.
+
+Global exception handler:
+
+- A shared Spring class that catches exceptions from controllers and turns them into HTTP responses.
+
+Validation error:
+
+- A request problem, such as a blank name or a number that must be greater than zero.
+
+Conflict error:
+
+- A request that is valid JSON but cannot be completed because it breaks a business rule, such as creating a duplicate policy name.
+
+Easy memory sentence:
+
+> The controller receives the request, and the exception handler formats errors when something goes wrong.
+
+### Source References
+
+Primary references used for this phase:
+
+- [Spring Framework reference: controller advice](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-advice.html)
+- [Spring Framework reference: exception handler methods](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-exceptionhandler.html)
+- [Spring Framework API: `ControllerAdvice`](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/bind/annotation/ControllerAdvice.html)
+- [Spring Framework API: `MethodArgumentNotValidException`](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/bind/MethodArgumentNotValidException.html)
+- [Spring Framework API: `ResponseEntityExceptionHandler`](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/servlet/mvc/method/annotation/ResponseEntityExceptionHandler.html)
+
+What these sources confirm:
+
+- `@ControllerAdvice` and `@RestControllerAdvice` can apply exception handling across controllers.
+- `@ExceptionHandler` methods can catch selected exception types.
+- Exception handler return values can include `ResponseEntity`.
+- `MethodArgumentNotValidException` is raised when `@Valid` request validation fails.
+
+Interview language:
+
+> I used Spring controller advice so API error formatting is centralized instead of duplicated inside every controller.
+
+### Add Shared API Error Classes
+
+Files added:
+
+- `backend/src/main/java/com/example/governance/api/ApiErrorResponse.java`
+- `backend/src/main/java/com/example/governance/api/FieldValidationError.java`
+
+What they do:
+
+- `ApiErrorResponse` is the common JSON shape for API errors.
+- `FieldValidationError` represents one invalid request field.
+
+Error response shape:
+
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Request validation failed",
+  "path": "/api/v1/retention-policies",
+  "fieldErrors": []
+}
+```
+
+Why:
+
+- Clients receive predictable error JSON.
+- Future frontend code can show useful error messages.
+- Future controllers can reuse the same response format.
+
+Interview language:
+
+> I introduced a shared API error response so clients receive consistent JSON errors across endpoints.
+
+### Add The Global Exception Handler
+
+File added:
+
+- `backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java`
+
+What it handles:
+
+- `DuplicateRetentionPolicyException` becomes HTTP `409 Conflict`.
+- `MethodArgumentNotValidException` becomes HTTP `400 Bad Request`.
+
+Important annotations:
+
+```java
+@RestControllerAdvice
+@ExceptionHandler(DuplicateRetentionPolicyException.class)
+@ExceptionHandler(MethodArgumentNotValidException.class)
+```
+
+Why:
+
+- The controller stays focused on successful requests.
+- Error behavior is handled in one shared place.
+- `409 Conflict` is clearer than returning a generic server error for duplicate names.
+
+Interview language:
+
+> I added a global exception handler to translate application exceptions into meaningful HTTP responses.
+
+### Update Controller Tests
+
+File updated:
+
+- `backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java`
+
+Changes:
+
+- Imported `ApiExceptionHandler` into the web-slice test.
+- Expanded the bad-request test to assert the structured `400` response body.
+- Added a duplicate-name test that asserts a structured `409` response body.
+
+Commands used to read back the files:
+
+```bash
+sed -n '1,180p' backend/src/main/java/com/example/governance/api/ApiErrorResponse.java
+sed -n '1,240p' backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java
+sed -n '1,120p' backend/src/main/java/com/example/governance/api/FieldValidationError.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java
+git status --short
+```
+
+Why:
+
+- Confirms the new error classes and updated test are correct before running tests.
+- Confirms Git sees only the expected files.
+
+Result:
+
+- Verified the new error response classes.
+- Verified the controller test now checks `400` and `409` structured error JSON.
+
+Interview language:
+
+> I updated controller tests so API error behavior is now part of the contract, not just an implementation detail.
+
+### Run Focused Controller Test
+
+```bash
+cd backend
+./mvnw -Dtest=RetentionPolicyControllerTests test
+```
+
+Why:
+
+- Runs only the controller test.
+- Verifies the new structured error responses without needing PostgreSQL.
+
+Result:
+
+- Build succeeded.
+- Tests run: 4.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I first ran the focused controller test to verify the HTTP error contract quickly without starting infrastructure.
+
+### Run Fast Tests
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Runs all fast `*Tests` classes.
+- Confirms the shared exception handler did not break existing controller or service tests.
+
+Result:
+
+- Build succeeded.
+- Tests run: 10.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I ran the fast test suite to confirm the new shared error handling still works with all non-database tests.
+
+### Run Full Verification With PostgreSQL
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+cd backend
+./mvnw verify
+```
+
+Why:
+
+- Starts PostgreSQL for integration tests.
+- Confirms database readiness.
+- Runs fast tests through Surefire.
+- Runs integration tests through Failsafe.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` reported that PostgreSQL was accepting connections.
+- Surefire ran 10 fast tests.
+- Failsafe ran 7 integration tests.
+- Build succeeded.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I ran full verification after changing shared API behavior so both web tests and database integration tests still pass.
+
+### Verify Database Cleanup
+
+```bash
+cd ..
+docker compose exec -T postgres psql -U governance -d governance -c "select count(*) as retention_policy_count from retention_policies;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+docker compose down
+```
+
+Why:
+
+- Confirms integration tests left no business rows behind.
+- Confirms Flyway migration history is still valid.
+- Stops local infrastructure after verification.
+
+Result:
+
+- `retention_policies` contained `0` rows.
+- Flyway showed version `1`, description `create records schema`, success `true`.
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> After full verification touched the real database, I confirmed cleanup and shut down local infrastructure.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- Checks for whitespace problems.
+- Confirms Docker Compose has no running services.
+- Shows the files changed by this phase.
+- Gives a compact summary of tracked changes.
+
+Result:
+
+- Whitespace check passed.
+- No Compose services were running.
+- `git status --short` showed the updated controller test, command log update, and three new API error classes.
+- `git diff --stat` showed tracked changes; the new API error classes remained untracked until staging.
+
+Interview language:
+
+> Before committing, I verify formatting, local infrastructure state, and the exact diff.
+
+### Stage And Commit The Phase
+
+```bash
+git add backend/src/main/java/com/example/governance/api/ApiErrorResponse.java backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java backend/src/main/java/com/example/governance/api/FieldValidationError.java backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+git diff --cached --stat
+git add docs/command-log.md
+git commit -m "feat: add structured API error responses"
+```
+
+Why:
+
+- Stages only the API error handling files and command log.
+- Reviews staged files before committing.
+- Creates a focused checkpoint before moving to records CRUD.
+
+Result:
+
+- Staged files were:
+  - `backend/src/main/java/com/example/governance/api/ApiErrorResponse.java`
+  - `backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java`
+  - `backend/src/main/java/com/example/governance/api/FieldValidationError.java`
+  - `backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java`
+  - `docs/command-log.md`
+- Staged whitespace check passed.
+- `git diff --cached --stat` summarized five staged files.
+- The extra `git add docs/command-log.md` restages this log after recording the staged-file inspection.
+
+Interview language:
+
+> I committed API error handling separately so the error contract can be reviewed independently from future business features.

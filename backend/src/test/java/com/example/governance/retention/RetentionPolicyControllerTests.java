@@ -1,8 +1,10 @@
 package com.example.governance.retention;
 
+import com.example.governance.api.ApiExceptionHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -17,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(RetentionPolicyController.class)
+@Import(ApiExceptionHandler.class)
 class RetentionPolicyControllerTests {
 
 	@Autowired
@@ -75,6 +78,38 @@ class RetentionPolicyControllerTests {
 								  "retentionPeriodDays": 0
 								}
 								"""))
-				.andExpect(status().isBadRequest());
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.message").value("Request validation failed"))
+				.andExpect(jsonPath("$.path").value("/api/v1/retention-policies"))
+				.andExpect(jsonPath("$.fieldErrors[0].field").value("name"))
+				.andExpect(jsonPath("$.fieldErrors[0].message").value("must not be blank"))
+				.andExpect(jsonPath("$.fieldErrors[1].field").value("retentionPeriodDays"))
+				.andExpect(jsonPath("$.fieldErrors[1].message").value("must be greater than 0"));
+	}
+
+	@Test
+	void createPolicyReturnsConflictForDuplicateName() throws Exception {
+		when(service.createPolicy("Legal Hold", "Duplicate name.", 30))
+				.thenThrow(new DuplicateRetentionPolicyException("Legal Hold"));
+
+		mockMvc.perform(post("/api/v1/retention-policies")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "name": "Legal Hold",
+								  "description": "Duplicate name.",
+								  "retentionPeriodDays": 30
+								}
+								"""))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Retention policy already exists: Legal Hold"))
+				.andExpect(jsonPath("$.path").value("/api/v1/retention-policies"))
+				.andExpect(jsonPath("$.fieldErrors.length()").value(0));
+
+		verify(service).createPolicy("Legal Hold", "Duplicate name.", 30);
 	}
 }
