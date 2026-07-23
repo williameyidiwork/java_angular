@@ -88,13 +88,27 @@ Optional environment overrides can be copied from `.env.example` into a local `.
 
 ### Backend
 
-Start PostgreSQL before running backend tests:
+Run fast backend tests without PostgreSQL:
+
+```bash
+cd backend
+./mvnw test
+```
+
+Run full backend verification with integration tests:
 
 ```bash
 docker compose up -d postgres
 cd backend
-./mvnw test
+./mvnw verify
+cd ..
+docker compose down
 ```
+
+Test naming:
+
+- `*Tests` files run during `./mvnw test`.
+- `*IT` files run during `./mvnw verify` and require PostgreSQL.
 
 Run the backend locally:
 

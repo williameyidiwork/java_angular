@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
-class DatabaseSchemaTests {
+class DatabaseSchemaIT {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;

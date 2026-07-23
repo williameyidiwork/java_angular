@@ -10,7 +10,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest
-class DatabaseConnectionTests {
+class DatabaseConnectionIT {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;

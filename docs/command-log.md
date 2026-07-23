@@ -3917,3 +3917,377 @@ Result:
 Interview language:
 
 > I committed the REST API separately so the HTTP layer can be reviewed independently from persistence and business rules.
+
+## Step 3.5: Separate Unit Tests From Integration Tests
+
+### Simple Definitions
+
+Surefire:
+
+- Maven plugin that runs regular tests during `./mvnw test`.
+
+Failsafe:
+
+- Maven plugin that runs integration tests during `./mvnw verify`.
+
+`*Tests`:
+
+- Fast tests in this project.
+- They should not need Docker.
+
+`*IT`:
+
+- Integration tests in this project.
+- They can use real PostgreSQL.
+
+Easy memory sentence:
+
+> `test` is for fast tests; `verify` is for full checks including integration tests.
+
+### Source References
+
+Primary references used for this phase:
+
+- [Maven Surefire Plugin: `surefire:test`](https://maven.apache.org/surefire/maven-surefire-plugin/test-mojo.html)
+- [Maven Failsafe Plugin: usage](https://maven.apache.org/surefire/maven-failsafe-plugin/usage.html)
+- [Maven Failsafe Plugin: introduction](https://maven.apache.org/components/surefire-archives/surefire-LATEST/maven-failsafe-plugin/index.html)
+- [Spring Boot reference: testing Spring Boot applications](https://docs.spring.io/spring-boot/reference/testing/spring-boot-applications.html)
+- [Spring Framework reference: `@MockitoBean`](https://docs.spring.io/spring-framework/reference/testing/annotations/integration-spring/annotation-mockitobean.html)
+
+What these sources confirm:
+
+- Surefire runs regular tests in the Maven `test` phase.
+- Surefire includes names like `*Test` and `*Tests` by default.
+- Failsafe is designed for integration tests.
+- Failsafe runs during `integration-test` and `verify`.
+- Maven integration tests are normally run with `mvn verify`.
+- Spring Boot recommends `@WebMvcTest` for focused Spring MVC controller tests.
+- Spring `@MockitoBean` can replace a Spring bean with a Mockito mock in a test context.
+
+### Check The Starting State
+
+```bash
+git status --short
+find backend/src/test/java -type f | sort
+sed -n '1,260p' backend/pom.xml
+sed -n '1,220p' backend/src/test/java/com/example/governance/GovernancePlatformApplicationTests.java
+sed -n '1,240p' backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java
+sed -n '1,220p' backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/database/DatabaseSchemaTests.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java
+sed -n '1,220p' backend/src/test/java/com/example/governance/retention/RetentionPolicyControllerTests.java
+```
+
+Why:
+
+- Confirms Git is clean before changing test structure.
+- Lists all current test files.
+- Reviews Maven plugin config before adding Failsafe.
+- Identifies which tests load the full Spring context or real PostgreSQL.
+
+Result:
+
+- Git started clean.
+- `GovernancePlatformApplicationTests`, database tests, and repository tests used full Spring/PostgreSQL behavior.
+- `RetentionPolicyControllerTests` already used `@WebMvcTest`.
+- `ApplicationInfoControllerTests` still used full Spring context even though it only tested a controller.
+
+Interview language:
+
+> I reviewed the test suite first so only tests that need real infrastructure become integration tests.
+
+### Rename Integration Tests To `*IT`
+
+Files renamed:
+
+- `GovernancePlatformApplicationTests.java` to `GovernancePlatformApplicationIT.java`
+- `DatabaseConnectionTests.java` to `DatabaseConnectionIT.java`
+- `DatabaseSchemaTests.java` to `DatabaseSchemaIT.java`
+- `RetentionPolicyRepositoryTests.java` to `RetentionPolicyRepositoryIT.java`
+
+Why:
+
+- `*IT` is a common Maven naming convention for integration tests.
+- These tests either load the full Spring context or touch real PostgreSQL.
+- Renaming them keeps them out of the fast `./mvnw test` command.
+
+Result:
+
+- Full-context/database tests now end with `IT`.
+
+Interview language:
+
+> I renamed database-backed tests to `*IT` so Maven can separate fast tests from infrastructure-dependent tests.
+
+### Configure Maven Failsafe
+
+File updated:
+
+- `backend/pom.xml`
+
+Plugin added:
+
+```xml
+<plugin>
+	<groupId>org.apache.maven.plugins</groupId>
+	<artifactId>maven-failsafe-plugin</artifactId>
+	<executions>
+		<execution>
+			<goals>
+				<goal>integration-test</goal>
+				<goal>verify</goal>
+			</goals>
+		</execution>
+	</executions>
+</plugin>
+```
+
+Why:
+
+- Surefire runs regular tests during the `test` phase.
+- Failsafe runs integration tests during the `integration-test` and `verify` phases.
+- This makes `./mvnw verify` run the renamed `*IT` files.
+
+Result:
+
+- Maven now has a separate integration-test runner.
+
+Interview language:
+
+> I configured Maven Failsafe so integration tests run in the proper Maven lifecycle phase instead of being mixed into the fast test phase.
+
+### Convert Info Controller Test To A Web Slice
+
+File updated:
+
+- `backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java`
+
+Change:
+
+```java
+@WebMvcTest(ApplicationInfoController.class)
+class ApplicationInfoControllerTests {
+```
+
+Why:
+
+- This test only checks HTTP behavior for one controller.
+- It does not need the full Spring application context.
+- It does not need PostgreSQL.
+
+Result:
+
+- `ApplicationInfoControllerTests` stays as a fast `*Tests` file.
+
+Interview language:
+
+> I converted the info controller test to a web-slice test because controller behavior can be tested without starting the full application or database.
+
+### Read Back The Edited Files
+
+```bash
+find backend/src/test/java -type f | sort
+sed -n '80,150p' backend/pom.xml
+sed -n '1,120p' backend/src/test/java/com/example/governance/GovernancePlatformApplicationIT.java
+sed -n '1,140p' backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java
+git status --short
+git diff -- backend/pom.xml backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java | sed -n '1,220p'
+```
+
+Why:
+
+- Confirms the new test file names.
+- Confirms the Failsafe plugin is present.
+- Confirms the info controller test uses `@WebMvcTest`.
+- Reviews the focused diff.
+
+Result:
+
+- Test files were split into `*Tests` and `*IT`.
+- Git showed the expected renames plus Maven and controller-test changes.
+
+Interview language:
+
+> I read the edited files back and reviewed the diff before running the separated Maven commands.
+
+### Run Fast Tests Without Docker
+
+```bash
+docker compose ps
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Confirms no Docker services are running.
+- Proves `./mvnw test` no longer needs PostgreSQL.
+- Runs only the fast `*Tests` classes.
+
+Result:
+
+- Docker Compose showed no running services.
+- Build succeeded.
+- Surefire ran 9 tests.
+- Failures: 0.
+- Errors: 0.
+- Failsafe was downloaded the first time because it was newly added to `pom.xml`.
+
+Interview language:
+
+> I verified that the regular test command is now fast and does not require external infrastructure.
+
+### Run Full Verification With PostgreSQL
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+cd backend
+./mvnw verify
+```
+
+Why:
+
+- Starts PostgreSQL for integration tests.
+- Confirms the database is accepting connections.
+- Runs Surefire tests first.
+- Packages the application.
+- Runs Failsafe integration tests second.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` reported that PostgreSQL was accepting connections.
+- Surefire ran 9 fast tests.
+- Failsafe ran 7 integration tests.
+- Build succeeded.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I verified the full Maven lifecycle: unit and web tests run under Surefire, while database integration tests run under Failsafe during `verify`.
+
+### Verify Database Cleanup
+
+```bash
+cd ..
+docker compose exec -T postgres psql -U governance -d governance -c "select count(*) as retention_policy_count from retention_policies;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+docker compose down
+```
+
+Why:
+
+- Confirms integration tests left no business rows behind.
+- Confirms Flyway migration history is still valid.
+- Confirms PostgreSQL is healthy before shutdown.
+- Stops local infrastructure after verification.
+
+Result:
+
+- `retention_policies` contained `0` rows.
+- Flyway showed version `1`, description `create records schema`, success `true`.
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> After integration tests touched the real database, I verified cleanup and stopped local infrastructure.
+
+### Update Developer Documentation
+
+File updated:
+
+- `README.md`
+
+Commands documented:
+
+```bash
+cd backend
+./mvnw test
+docker compose up -d postgres
+./mvnw verify
+cd ..
+docker compose down
+```
+
+Why:
+
+- The everyday testing workflow changed.
+- Developers should know which command needs Docker and which command does not.
+
+Result:
+
+- README now says `*Tests` run with `./mvnw test`.
+- README now says `*IT` files run with `./mvnw verify` and require PostgreSQL.
+
+Interview language:
+
+> I updated the README when the test workflow changed so the project remains easy for another developer to run.
+
+### Final Checks Before Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+```
+
+Why:
+
+- Checks for whitespace problems.
+- Confirms Docker Compose has no running services.
+- Shows the files changed by this phase.
+- Gives a compact summary of tracked changes.
+
+Result:
+
+- Whitespace check passed.
+- No Compose services were running.
+- `git status --short` showed the README update, Maven config change, command log update, test renames, and info controller test update.
+- `git diff --stat` showed tracked changes; the new `*IT` files remained untracked until staging.
+
+Interview language:
+
+> Before committing, I verify formatting, local infrastructure state, and the exact diff.
+
+### Stage And Commit The Phase
+
+```bash
+git add README.md backend/pom.xml backend/src/test/java/com/example/governance/GovernancePlatformApplicationTests.java backend/src/test/java/com/example/governance/GovernancePlatformApplicationIT.java backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java backend/src/test/java/com/example/governance/database/DatabaseConnectionTests.java backend/src/test/java/com/example/governance/database/DatabaseConnectionIT.java backend/src/test/java/com/example/governance/database/DatabaseSchemaTests.java backend/src/test/java/com/example/governance/database/DatabaseSchemaIT.java backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryTests.java backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryIT.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git status --short
+git diff --cached --stat
+git add docs/command-log.md
+git commit -m "test: separate unit and integration tests"
+```
+
+Why:
+
+- Stages only the test-separation files and documentation.
+- Reviews staged files before committing.
+- Creates a focused checkpoint for the new test workflow.
+
+Result:
+
+- Staged files were:
+  - `README.md`
+  - `backend/pom.xml`
+  - `backend/src/test/java/com/example/governance/GovernancePlatformApplicationIT.java`
+  - `backend/src/test/java/com/example/governance/api/ApplicationInfoControllerTests.java`
+  - `backend/src/test/java/com/example/governance/database/DatabaseConnectionIT.java`
+  - `backend/src/test/java/com/example/governance/database/DatabaseSchemaIT.java`
+  - `backend/src/test/java/com/example/governance/retention/RetentionPolicyRepositoryIT.java`
+  - `docs/command-log.md`
+- Git detected the old `*Tests` files as renames to the new `*IT` files.
+- Staged whitespace check passed.
+- `git diff --cached --stat` summarized eight staged files.
+- The extra `git add docs/command-log.md` restages this log after recording the staged-file inspection.
+
+Interview language:
+
+> I committed the test separation as its own checkpoint because it changes how developers run and reason about the test suite.
