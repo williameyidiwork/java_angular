@@ -5191,3 +5191,333 @@ Result:
 Interview language:
 
 > I kept the comment pass as a separate commit so the learning notes are easy to review apart from behavior changes.
+
+## Step 4.2: Manual Records API HTTP Verification
+
+This step runs the real backend with the real PostgreSQL database, then calls the records endpoints with `curl`. No application code changed in this step. The goal is to prove the API works outside unit tests.
+
+### Official References Used
+
+- curl command-line options: https://everything.curl.dev/cmdline/options/index.html
+- Docker Compose `up`: https://docs.docker.com/reference/cli/docker/compose/up/
+- Docker Compose `exec`: https://docs.docker.com/reference/cli/docker/compose/exec/
+- Docker Compose `down`: https://docs.docker.com/reference/cli/docker/compose/down/
+- Spring Boot Actuator endpoints and health: https://docs.enterprise.spring.io/spring-boot/reference/actuator/endpoints.html
+
+### Inspect The Current State
+
+```bash
+git status --short
+sed -n '1,220p' backend/src/main/resources/application.properties
+sed -n '1,260p' backend/docker-compose.yml
+find backend/src/main/java/com/example/governance -type f
+find . -maxdepth 3 -name 'docker-compose.yml' -o -name 'compose.yml' -o -name 'docker-compose.yaml'
+find . -type f | grep -E '(^|/)(docker-compose|compose)\.(ya?ml)$'
+ls -la
+ls -la backend
+find . -maxdepth 4 -type f | sort | sed -n '1,160p'
+sed -n '1,220p' compose.yaml
+sed -n '1,160p' .env.example
+```
+
+Why:
+
+- Confirms Git is clean before the phase.
+- Reads the backend database settings and application name.
+- Locates the Compose file.
+- Reads the Compose service name, PostgreSQL port, database name, username, and password defaults.
+
+Result:
+
+- Git started clean.
+- `application.properties` points to `jdbc:postgresql://localhost:5432/governance`.
+- The Compose file is `compose.yaml` at the repository root.
+- `backend/docker-compose.yml` did not exist, so the correct file path is the root `compose.yaml`.
+
+Interview language:
+
+> I inspected configuration before running the app so the backend, database, and HTTP calls all used the same connection details.
+
+### Start PostgreSQL
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+```
+
+Why:
+
+- Starts PostgreSQL in the background.
+- Confirms PostgreSQL is accepting connections.
+- Checks the container status before starting Spring Boot.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` returned `accepting connections`.
+- The PostgreSQL container became healthy.
+
+Interview language:
+
+> I started the database first because the backend validates its schema and opens a database connection during startup.
+
+### Start The Backend
+
+```bash
+cd backend
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+Why:
+
+- Runs the Spring Boot application from source.
+- Uses the Maven wrapper so local Maven installation is not required.
+- Overrides the port to `8081` to avoid conflicts with anything already using `8080`.
+
+Result:
+
+- Spring Boot started successfully.
+- Tomcat listened on port `8081`.
+- Flyway validated migration version `1`.
+- Hibernate connected to PostgreSQL.
+
+Interview language:
+
+> I ran the backend locally on a temporary port and verified that it connected to PostgreSQL before testing the API.
+
+### Clean Manual-Test Rows
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "delete from records; delete from retention_policies;"
+```
+
+Why:
+
+- Starts the manual test from a known database state.
+- Deletes child rows first because records can reference retention policies.
+
+Result:
+
+- `records` deleted rows: `0`.
+- `retention_policies` deleted rows: `0`.
+
+Interview language:
+
+> I cleaned test data first so the manual API verification was repeatable.
+
+### Diagnose Local Curl Access
+
+```bash
+curl -sS -i http://localhost:8081/api/v1/info
+curl -sS -i http://127.0.0.1:8081/api/v1/info
+lsof -nP -iTCP:8081 -sTCP:LISTEN
+ps -p 58525 -o pid,ppid,command
+docker compose ps
+```
+
+Why:
+
+- The first non-elevated `curl` calls could not connect from the sandboxed command environment.
+- `lsof` confirmed Java was listening on `*:8081`.
+- `docker compose ps` confirmed PostgreSQL was healthy.
+
+Result:
+
+- The backend was running and listening.
+- The local HTTP calls needed elevated command permission in this environment.
+- `ps` was blocked by sandbox permissions, but it was not needed after `lsof` proved the port listener.
+
+Interview language:
+
+> I verified the server was actually listening before blaming the application. The issue was command sandbox access, not Spring Boot.
+
+### Verify Read Endpoints
+
+```bash
+curl -sS -i http://127.0.0.1:8081/api/v1/info
+curl -sS -i http://127.0.0.1:8081/actuator/health
+curl -sS -i http://127.0.0.1:8081/api/v1/records
+```
+
+Why:
+
+- Confirms the API is reachable.
+- Confirms the health endpoint reports database connectivity.
+- Confirms the records endpoint returns an empty list before creating data.
+
+Result:
+
+- `GET /api/v1/info` returned `200`.
+- `GET /actuator/health` returned `200` with overall status `UP` and database status `UP`.
+- `GET /api/v1/records` returned `200` and `[]`.
+
+Interview language:
+
+> I checked health and read endpoints before writes so I knew the server and database were ready.
+
+### Create A Retention Policy Through HTTP
+
+```bash
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/retention-policies -H 'Content-Type: application/json' -d '{"name":"Manual API Policy","description":"Policy created during manual API verification.","retentionPeriodDays":365}'
+```
+
+Why:
+
+- Creates a real retention policy through the API.
+- Gives the records API a real `retentionPolicyId` to use.
+
+Result:
+
+- Returned HTTP `201 Created`.
+- Created retention policy ID: `2e971848-1277-4799-9df2-eb7dac4c91e2`.
+
+Interview language:
+
+> I created related data through the public API so the records test used realistic workflow steps.
+
+### Create A Record Through HTTP
+
+```bash
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-MANUAL-001","name":"Manual API Record","retentionPolicyId":"2e971848-1277-4799-9df2-eb7dac4c91e2"}'
+```
+
+Why:
+
+- Sends real JSON into the records controller.
+- Verifies controller, validation, service, repository, JPA, and PostgreSQL together.
+
+Result:
+
+- Returned HTTP `201 Created`.
+- Response included:
+  - `externalId`: `REC-MANUAL-001`
+  - `name`: `Manual API Record`
+  - `status`: `ACTIVE`
+  - `retentionPolicyId`: `2e971848-1277-4799-9df2-eb7dac4c91e2`
+
+Interview language:
+
+> I created a record through HTTP to verify the full request path from client JSON to database persistence.
+
+### Verify List And Error Responses
+
+```bash
+curl -sS -i http://127.0.0.1:8081/api/v1/records
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-MANUAL-001","name":"Duplicate Manual API Record"}'
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"","name":""}'
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-MANUAL-404","name":"Missing Policy Manual Record","retentionPolicyId":"11111111-1111-1111-1111-111111111111"}'
+```
+
+Why:
+
+- Verifies successful reads.
+- Verifies duplicate business-rule error.
+- Verifies request validation error.
+- Verifies missing related-resource error.
+
+Result:
+
+- `GET /api/v1/records` returned `200` with one record.
+- Duplicate external ID returned `409 Conflict`.
+- Blank `externalId` and `name` returned `400 Bad Request`.
+- Missing retention policy ID returned `404 Not Found`.
+
+Interview language:
+
+> I verified both happy path and important failure paths so the API contract is more than just a successful create.
+
+### Verify Database Rows
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies order by table_name;"
+docker compose exec -T postgres psql -U governance -d governance -c "select r.external_id, r.name, r.status, p.name as retention_policy_name from records r left join retention_policies p on p.id = r.retention_policy_id order by r.external_id;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+```
+
+Why:
+
+- Confirms the HTTP create calls inserted rows into PostgreSQL.
+- Confirms the record points to the expected retention policy.
+- Confirms Flyway schema history is still valid.
+
+Result:
+
+- `records` row count: `1`.
+- `retention_policies` row count: `1`.
+- Record row:
+  - `external_id`: `REC-MANUAL-001`
+  - `name`: `Manual API Record`
+  - `status`: `ACTIVE`
+  - `retention_policy_name`: `Manual API Policy`
+- Flyway version `1`, description `create records schema`, success `true`.
+
+Interview language:
+
+> I verified the database directly after HTTP calls so I knew the API did not just return JSON, it actually persisted data.
+
+### Clean Up And Stop Services
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "delete from records; delete from retention_policies;"
+kill 58525
+lsof -nP -iTCP:8081 -sTCP:LISTEN
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies order by table_name;"
+docker compose ps
+docker compose down
+```
+
+Why:
+
+- Removes manual test rows.
+- Stops the Spring Boot process that was running on port `8081`.
+- Confirms port `8081` is no longer listening.
+- Confirms the database is back to zero business rows.
+- Stops PostgreSQL and removes the Compose network.
+
+Result:
+
+- Deleted `1` record and `1` retention policy.
+- Port `8081` closed.
+- `records` row count after cleanup: `0`.
+- `retention_policies` row count after cleanup: `0`.
+- Docker Compose stopped PostgreSQL and removed the network.
+
+Interview language:
+
+> I cleaned up after manual verification so the local environment stayed repeatable and did not leave services running.
+
+### Final Checks And Commit
+
+```bash
+git diff --check
+git status --short
+git diff --stat
+docker compose ps
+git add docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git diff --cached --stat
+git status --short
+git add docs/command-log.md
+git commit -m "docs: record manual records API verification"
+```
+
+Why:
+
+- Confirms the command-log update has no whitespace problems.
+- Confirms Docker Compose is stopped.
+- Stages only the documentation for this manual verification phase.
+- Reviews the staged documentation before committing.
+
+Result:
+
+- Whitespace check passed.
+- Only `docs/command-log.md` changed.
+- Docker Compose showed no running services.
+- Staged files: `docs/command-log.md`.
+- Staged whitespace check passed.
+
+Interview language:
+
+> I committed the manual verification notes separately because this phase changed documentation, not application behavior.
