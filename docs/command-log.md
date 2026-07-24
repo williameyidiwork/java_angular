@@ -5781,3 +5781,286 @@ Result:
 Interview language:
 
 > I committed pagination separately so the API contract change is easy to review and explain.
+
+## Step 4.3a: Manually Verify Records Pagination
+
+This step runs the real backend with real PostgreSQL and proves the pagination behavior through `curl`.
+
+### Inspect The Current State
+
+```bash
+git status --short
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,220p' compose.yaml
+```
+
+Why:
+
+- Confirms Git is clean before manual verification.
+- Reads the endpoint defaults: `page=0` and `size=20`.
+- Reads the service limit: maximum page size is `100`.
+- Confirms the PostgreSQL Compose service name and port.
+
+Result:
+
+- Git started clean.
+- Records pagination code was present.
+- PostgreSQL is configured through the root `compose.yaml`.
+
+Interview language:
+
+> I inspected the endpoint and service rules first so my manual HTTP checks matched the code.
+
+### Start Runtime Services
+
+```bash
+lsof -nP -iTCP:8081 -sTCP:LISTEN
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+cd backend
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+Why:
+
+- Confirms port `8081` is free before starting the backend.
+- Starts PostgreSQL.
+- Confirms PostgreSQL is accepting connections.
+- Starts Spring Boot on port `8081`.
+
+Result:
+
+- Port `8081` was free.
+- PostgreSQL started.
+- `pg_isready` returned `accepting connections`.
+- Spring Boot started successfully on port `8081`.
+- Flyway confirmed schema version `1` was up to date.
+
+Interview language:
+
+> I started the database first, then the backend, because the application connects to PostgreSQL during startup.
+
+### Start From Clean Data
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "delete from records; delete from retention_policies;"
+curl -sS -i 'http://127.0.0.1:8081/api/v1/records?page=0&size=2'
+```
+
+Why:
+
+- Deletes old manual records before the test.
+- Calls the paginated endpoint before inserting data.
+
+Result:
+
+- Deleted `0` records and `0` retention policies.
+- Empty paginated response returned HTTP `200`.
+- Response metadata:
+  - `content`: `[]`
+  - `page`: `0`
+  - `size`: `2`
+  - `totalElements`: `0`
+  - `totalPages`: `0`
+  - `first`: `true`
+  - `last`: `true`
+
+Interview language:
+
+> I verified the empty page first so I knew the response shape was correct before adding sample data.
+
+### Create Three Sample Records
+
+```bash
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-PAGE-001","name":"Pagination Record One"}'
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-PAGE-002","name":"Pagination Record Two"}'
+curl -sS -i -X POST http://127.0.0.1:8081/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-PAGE-003","name":"Pagination Record Three"}'
+```
+
+Why:
+
+- Creates enough records to prove pagination splits data across multiple pages.
+- Leaves out `retentionPolicyId` because that field is optional and not needed for pagination.
+
+Result:
+
+- All three `POST` calls returned HTTP `201 Created`.
+- Created:
+  - `REC-PAGE-001`
+  - `REC-PAGE-002`
+  - `REC-PAGE-003`
+- All records started with status `ACTIVE`.
+
+Interview language:
+
+> I created three records so a page size of two would produce two pages.
+
+### Verify Successful Pagination
+
+```bash
+curl -sS -i 'http://127.0.0.1:8081/api/v1/records?page=0&size=2'
+curl -sS -i 'http://127.0.0.1:8081/api/v1/records?page=1&size=2'
+curl -sS -i 'http://127.0.0.1:8081/api/v1/records'
+```
+
+Why:
+
+- `page=0&size=2` should return the first two records.
+- `page=1&size=2` should return the remaining third record.
+- No query parameters should use defaults: `page=0` and `size=20`.
+
+Result:
+
+- `GET /api/v1/records?page=0&size=2` returned:
+  - HTTP `200`
+  - `REC-PAGE-001`
+  - `REC-PAGE-002`
+  - `page`: `0`
+  - `size`: `2`
+  - `totalElements`: `3`
+  - `totalPages`: `2`
+  - `first`: `true`
+  - `last`: `false`
+- `GET /api/v1/records?page=1&size=2` returned:
+  - HTTP `200`
+  - `REC-PAGE-003`
+  - `page`: `1`
+  - `size`: `2`
+  - `totalElements`: `3`
+  - `totalPages`: `2`
+  - `first`: `false`
+  - `last`: `true`
+- `GET /api/v1/records` returned:
+  - HTTP `200`
+  - all three records
+  - `page`: `0`
+  - `size`: `20`
+  - `totalElements`: `3`
+  - `totalPages`: `1`
+
+Interview language:
+
+> I verified both explicit pagination and default pagination so the endpoint works for clients that pass query parameters and clients that do not.
+
+### Verify Pagination Errors
+
+```bash
+curl -sS -i 'http://127.0.0.1:8081/api/v1/records?page=-1&size=2'
+curl -sS -i 'http://127.0.0.1:8081/api/v1/records?page=0&size=0'
+curl -sS -i 'http://127.0.0.1:8081/api/v1/records?page=0&size=101'
+```
+
+Why:
+
+- Checks the request rules enforced by `GovernanceRecordService`.
+- Confirms bad pagination returns structured API errors.
+
+Result:
+
+- `page=-1` returned HTTP `400` with message `Page index must be zero or greater.`
+- `size=0` returned HTTP `400` with message `Page size must be between 1 and 100.`
+- `size=101` returned HTTP `400` with message `Page size must be between 1 and 100.`
+
+Interview language:
+
+> I verified invalid pagination too, because professional APIs need predictable failure responses, not only happy paths.
+
+### Verify Database Rows
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select count(*) as record_count from records;"
+docker compose exec -T postgres psql -U governance -d governance -c "select external_id, name, status from records order by external_id;"
+docker compose ps
+```
+
+Why:
+
+- Confirms the three HTTP creates persisted three database rows.
+- Confirms sorting by `external_id` matches the paginated order.
+- Confirms PostgreSQL stayed healthy during the manual test.
+
+Result:
+
+- Database record count: `3`.
+- Rows:
+  - `REC-PAGE-001`, `Pagination Record One`, `ACTIVE`
+  - `REC-PAGE-002`, `Pagination Record Two`, `ACTIVE`
+  - `REC-PAGE-003`, `Pagination Record Three`, `ACTIVE`
+- PostgreSQL was healthy.
+
+Interview language:
+
+> I checked the database directly so I knew pagination was reading persisted data, not just returning mocked responses.
+
+### Clean Up And Stop Services
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "delete from records; delete from retention_policies;"
+```
+
+Then stop the Spring Boot terminal with `Ctrl-C`.
+
+```bash
+lsof -nP -iTCP:8081 -sTCP:LISTEN
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies order by table_name;"
+docker compose ps
+docker compose down
+```
+
+Why:
+
+- Removes the sample records.
+- Stops the backend gracefully.
+- Confirms port `8081` is closed.
+- Confirms business tables are empty again.
+- Stops PostgreSQL.
+
+Result:
+
+- Deleted `3` records and `0` retention policies.
+- Spring Boot graceful shutdown completed.
+- Port `8081` closed.
+- `records` row count after cleanup: `0`.
+- `retention_policies` row count after cleanup: `0`.
+- Docker Compose stopped PostgreSQL and removed the network.
+
+Interview language:
+
+> I cleaned up after manual verification so the local environment stayed repeatable and no services were left running.
+
+### Final Checks And Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+git add docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git diff --cached --stat
+git status --short
+git add docs/command-log.md
+git commit -m "docs: record manual pagination verification"
+```
+
+Why:
+
+- Confirms the command-log update has no whitespace problems.
+- Confirms Docker Compose is stopped.
+- Stages only the documentation for this manual verification phase.
+- Reviews staged documentation before committing.
+
+Result:
+
+- Whitespace check passed.
+- Docker Compose showed no running services.
+- Only `docs/command-log.md` changed.
+- Staged files: `docs/command-log.md`.
+- Staged whitespace check passed.
+
+Interview language:
+
+> I committed the manual pagination verification separately because this phase proves behavior but does not change application code.
