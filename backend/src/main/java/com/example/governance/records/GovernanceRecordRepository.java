@@ -1,5 +1,7 @@
 package com.example.governance.records;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
@@ -12,4 +14,7 @@ public interface GovernanceRecordRepository extends JpaRepository<GovernanceReco
 	// Spring Data reads this method name and creates a query using the externalId field.
 	// Optional is used because the record may or may not exist.
 	Optional<GovernanceRecord> findByExternalId(String externalId);
+
+	// Spring Data creates a paginated query using the status field.
+	Page<GovernanceRecord> findByStatus(RecordStatus status, Pageable pageable);
 }

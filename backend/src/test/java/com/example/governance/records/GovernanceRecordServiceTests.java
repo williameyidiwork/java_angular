@@ -131,7 +131,7 @@ class GovernanceRecordServiceTests {
 		when(repository.findAll(pageRequest)).thenReturn(new PageImpl<>(records, pageRequest, 5));
 
 		// Act: call the real service list method.
-		Page<GovernanceRecord> result = service.listRecords(0, 2);
+		Page<GovernanceRecord> result = service.listRecords(0, 2, null);
 
 		// Assert: result came from repository using the expected stable sort.
 		assertEquals(records, result.getContent());
@@ -142,11 +142,31 @@ class GovernanceRecordServiceTests {
 	}
 
 	@Test
+	void listsPagedRecordsByStatus() {
+		// Arrange: expected archived records and expected page request.
+		List<GovernanceRecord> records = List.of(
+				new GovernanceRecord("REC-300", "Archived Contract", RecordStatus.ARCHIVED, null)
+		);
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(repository.findByStatus(RecordStatus.ARCHIVED, pageRequest))
+				.thenReturn(new PageImpl<>(records, pageRequest, 1));
+
+		// Act: call the real service list method with a status filter.
+		Page<GovernanceRecord> result = service.listRecords(0, 20, RecordStatus.ARCHIVED);
+
+		// Assert: service used the filtered repository method instead of unfiltered findAll.
+		assertEquals(records, result.getContent());
+		assertEquals(1, result.getTotalElements());
+		verify(repository).findByStatus(RecordStatus.ARCHIVED, pageRequest);
+		verify(repository, never()).findAll(any(PageRequest.class));
+	}
+
+	@Test
 	void rejectsNegativePageNumber() {
 		// Act and assert: page numbers are zero-based, so negative numbers are invalid.
 		InvalidRecordPageRequestException exception = assertThrows(
 				InvalidRecordPageRequestException.class,
-				() -> service.listRecords(-1, 20)
+				() -> service.listRecords(-1, 20, null)
 		);
 
 		assertEquals("Page index must be zero or greater.", exception.getMessage());
@@ -158,7 +178,7 @@ class GovernanceRecordServiceTests {
 		// Act and assert: size must be at least 1 because a page with 0 rows is not useful.
 		InvalidRecordPageRequestException exception = assertThrows(
 				InvalidRecordPageRequestException.class,
-				() -> service.listRecords(0, 0)
+				() -> service.listRecords(0, 0, null)
 		);
 
 		assertEquals("Page size must be between 1 and 100.", exception.getMessage());
@@ -170,7 +190,7 @@ class GovernanceRecordServiceTests {
 		// Act and assert: cap page size so one request cannot ask for too many rows.
 		InvalidRecordPageRequestException exception = assertThrows(
 				InvalidRecordPageRequestException.class,
-				() -> service.listRecords(0, 101)
+				() -> service.listRecords(0, 101, null)
 		);
 
 		assertEquals("Page size must be between 1 and 100.", exception.getMessage());

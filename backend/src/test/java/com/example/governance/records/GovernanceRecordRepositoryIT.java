@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Optional;
@@ -81,6 +84,26 @@ class GovernanceRecordRepositoryIT {
 		);
 
 		assertEquals(policy.getId(), storedPolicyId);
+	}
+
+	@Test
+	void findsRecordsByStatusWithPaging() {
+		// Arrange: save records with different statuses so the query has something to filter.
+		repository.saveAndFlush(new GovernanceRecord("REC-100", "Active Record", RecordStatus.ACTIVE, null));
+		repository.saveAndFlush(new GovernanceRecord("REC-200", "Archived Record One", RecordStatus.ARCHIVED, null));
+		repository.saveAndFlush(new GovernanceRecord("REC-300", "Archived Record Two", RecordStatus.ARCHIVED, null));
+
+		// Act: ask PostgreSQL for the first archived record, sorted by external ID.
+		Page<GovernanceRecord> archivedRecords = repository.findByStatus(
+				RecordStatus.ARCHIVED,
+				PageRequest.of(0, 1, Sort.by("externalId").ascending())
+		);
+
+		// Assert: the database returned only archived records and kept pagination metadata.
+		assertEquals(1, archivedRecords.getContent().size());
+		assertEquals("REC-200", archivedRecords.getContent().getFirst().getExternalId());
+		assertEquals(2, archivedRecords.getTotalElements());
+		assertEquals(2, archivedRecords.getTotalPages());
 	}
 
 	@Test

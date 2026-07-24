@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.Comparator;
 import java.util.List;
@@ -77,6 +78,22 @@ public class ApiExceptionHandler {
 		ApiErrorResponse response = ApiErrorResponse.of(
 				HttpStatus.BAD_REQUEST,
 				exception.getMessage(),
+				request.getRequestURI()
+		);
+
+		return ResponseEntity.badRequest().body(response);
+	}
+
+	// Request parsing failure: Spring could not convert a query parameter to the expected Java type.
+	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
+	public ResponseEntity<ApiErrorResponse> handleTypeMismatch(
+			MethodArgumentTypeMismatchException exception,
+			HttpServletRequest request
+	) {
+		// Example: status=UNKNOWN cannot be converted into the RecordStatus enum.
+		ApiErrorResponse response = ApiErrorResponse.of(
+				HttpStatus.BAD_REQUEST,
+				"Invalid value for parameter '" + exception.getName() + "'.",
 				request.getRequestURI()
 		);
 

@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -66,7 +67,7 @@ class GovernanceRecordControllerTests {
 	void listRecordsReturnsFirstPageFromService() throws Exception {
 		// Arrange: the fake service returns two records.
 		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
-		when(service.listRecords(0, 20)).thenReturn(new PageImpl<>(List.of(
+		when(service.listRecords(0, 20, null)).thenReturn(new PageImpl<>(List.of(
 				new GovernanceRecord("REC-100", "Finance Report", RecordStatus.ACTIVE, null),
 				new GovernanceRecord("REC-200", "Legal Contract", RecordStatus.ACTIVE, null)
 		), pageRequest, 2));
@@ -86,14 +87,14 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.last").value(true));
 
 		// Assert: controller asked the service for the list.
-		verify(service).listRecords(0, 20);
+		verify(service).listRecords(0, 20, null);
 	}
 
 	@Test
 	void listRecordsUsesRequestedPageAndSize() throws Exception {
 		// Arrange: page=1 and size=1 means the client wants the second page with one item.
 		PageRequest pageRequest = PageRequest.of(1, 1, Sort.by("externalId").ascending());
-		when(service.listRecords(1, 1)).thenReturn(new PageImpl<>(List.of(
+		when(service.listRecords(1, 1, null)).thenReturn(new PageImpl<>(List.of(
 				new GovernanceRecord("REC-200", "Legal Contract", RecordStatus.ACTIVE, null)
 		), pageRequest, 2));
 
@@ -110,13 +111,34 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.first").value(false))
 				.andExpect(jsonPath("$.last").value(true));
 
-		verify(service).listRecords(1, 1);
+		verify(service).listRecords(1, 1, null);
+	}
+
+	@Test
+	void listRecordsUsesStatusFilterWhenProvided() throws Exception {
+		// Arrange: status=ARCHIVED means the client only wants archived records.
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(service.listRecords(0, 20, RecordStatus.ARCHIVED)).thenReturn(new PageImpl<>(List.of(
+				new GovernanceRecord("REC-300", "Archived Contract", RecordStatus.ARCHIVED, null)
+		), pageRequest, 1));
+
+		// Act and assert: the status query parameter is converted to RecordStatus and returned in JSON.
+		mockMvc.perform(get("/api/v1/records")
+						.param("status", "ARCHIVED"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.content[0].externalId").value("REC-300"))
+				.andExpect(jsonPath("$.content[0].status").value("ARCHIVED"))
+				.andExpect(jsonPath("$.page").value(0))
+				.andExpect(jsonPath("$.size").value(20))
+				.andExpect(jsonPath("$.totalElements").value(1));
+
+		verify(service).listRecords(0, 20, RecordStatus.ARCHIVED);
 	}
 
 	@Test
 	void listRecordsReturnsBadRequestForInvalidPagination() throws Exception {
 		// Arrange: the fake service applies the same pagination rule as the real service.
-		when(service.listRecords(-1, 20))
+		when(service.listRecords(-1, 20, null))
 				.thenThrow(new InvalidRecordPageRequestException("Page index must be zero or greater."));
 
 		// Act and assert: invalid pagination becomes structured 400 JSON.
@@ -128,7 +150,22 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.message").value("Page index must be zero or greater."))
 				.andExpect(jsonPath("$.path").value("/api/v1/records"));
 
-		verify(service).listRecords(-1, 20);
+		verify(service).listRecords(-1, 20, null);
+	}
+
+	@Test
+	void listRecordsReturnsBadRequestForInvalidStatus() throws Exception {
+		// Act and assert: Spring cannot convert UNKNOWN into the RecordStatus enum.
+		mockMvc.perform(get("/api/v1/records")
+						.param("status", "UNKNOWN"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.message").value("Invalid value for parameter 'status'."))
+				.andExpect(jsonPath("$.path").value("/api/v1/records"));
+
+		// IMPORTANT: conversion failed before controller business logic called the service.
+		verifyNoInteractions(service);
 	}
 
 	@Test

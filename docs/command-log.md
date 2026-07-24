@@ -6064,3 +6064,272 @@ Result:
 Interview language:
 
 > I committed the manual pagination verification separately because this phase proves behavior but does not change application code.
+
+## Step 4.5: Add Records Status Filtering
+
+### Official References Used
+
+- [Spring Data JPA - JPA Query Methods](https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html)
+- [Spring Data JPA - Defining Query Methods](https://docs.spring.io/spring-data/jpa/reference/repositories/query-methods-details.html)
+- [Spring Framework - `@RequestParam`](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-methods/requestparam.html)
+- [Spring Framework - Type Conversion](https://docs.spring.io/spring-framework/reference/core/validation/convert.html)
+
+Why:
+
+- Spring Data query-method documentation explains why a method like `findByStatus(...)` can become a database query without writing SQL.
+- `@RequestParam` documentation explains how Spring reads query parameters such as `?status=ACTIVE`.
+- Type-conversion documentation explains the general Spring feature that converts text request values into Java types.
+
+Interview language:
+
+> I added filtering using Spring MVC query parameters and Spring Data JPA derived query methods, which keeps the API code small while still using framework-standard behavior.
+
+### Inspect The Existing Records Code
+
+```bash
+git status --short
+git diff --stat
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java
+sed -n '1,300p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,300p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+sed -n '1,340p' backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java
+sed -n '1,460p' backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java
+sed -n '1,420p' backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java
+sed -n '1,340p' backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java
+grep -R "listRecords(" -n backend/src/main/java backend/src/test/java
+```
+
+Why:
+
+- Checks the current files before changing behavior.
+- Finds every place that calls `listRecords(...)`, because adding a filter changes that method signature.
+- Uses `grep` because `rg` is not available on this computer.
+
+Result:
+
+- Found the controller, service, repository, and tests that needed to understand the optional `status` filter.
+- Confirmed the worktree only changed files related to records filtering.
+
+Interview language:
+
+> Before changing the service method signature, I searched all usages so the codebase would stay consistent.
+
+### Add Status Filtering
+
+Files updated:
+
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordService.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordController.java`
+- `backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java`
+
+Why:
+
+- `GovernanceRecordController` now accepts an optional `status` query parameter.
+- `GovernanceRecordService` decides whether to call the filtered query or the normal paginated query.
+- `GovernanceRecordRepository` now declares `findByStatus(RecordStatus status, Pageable pageable)`.
+- `ApiExceptionHandler` now returns a clean `400 Bad Request` when a client sends an invalid enum value like `status=UNKNOWN`.
+
+Result:
+
+- `GET /api/v1/records?page=0&size=20` still lists all records.
+- `GET /api/v1/records?page=0&size=20&status=ACTIVE` lists only active records.
+- `GET /api/v1/records?status=UNKNOWN` returns structured error JSON instead of a confusing default framework error.
+
+Interview language:
+
+> I kept filtering optional, so existing clients can keep calling the list endpoint without changing anything.
+
+### Update Tests
+
+Files updated:
+
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java`
+
+Why:
+
+- Controller tests prove the HTTP query parameter is converted into `RecordStatus`.
+- Service tests prove the service chooses `findByStatus(...)` only when a status filter is present.
+- Repository integration tests prove the real PostgreSQL query filters by `status` and keeps pagination metadata.
+
+Result:
+
+- Added a controller test for `?status=ARCHIVED`.
+- Added a controller test for invalid status values.
+- Added a service test for the filtered repository call.
+- Added a repository integration test that saves active and archived records, then asks the database for archived records only.
+
+Interview language:
+
+> I tested the filter at three levels: HTTP input, service decision, and real database query.
+
+### Run Focused Records Tests
+
+```bash
+./mvnw -Dtest=GovernanceRecordServiceTests,GovernanceRecordControllerTests test
+```
+
+Why:
+
+- Runs only the fast tests touched by this phase.
+- Gives quick feedback before running the whole suite.
+
+Result:
+
+- Build passed.
+- Tests run: `18`.
+- Failures: `0`.
+- Errors: `0`.
+- Skipped: `0`.
+
+Interview language:
+
+> I first ran the focused test set so I could catch local mistakes quickly.
+
+### Run The Full Fast Test Suite
+
+```bash
+./mvnw test
+```
+
+Why:
+
+- Runs all unit and web tests handled by Maven Surefire.
+- Does not require PostgreSQL.
+
+Result:
+
+- Build passed.
+- Tests run: `28`.
+- Failures: `0`.
+- Errors: `0`.
+- Skipped: `0`.
+
+Interview language:
+
+> After focused tests passed, I ran the full fast suite to make sure nothing else broke.
+
+### Start PostgreSQL For Integration Tests
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+```
+
+Why:
+
+- Starts the local PostgreSQL container required by repository integration tests.
+- `pg_isready` confirms PostgreSQL is accepting connections.
+- `docker compose ps` confirms the container is healthy.
+
+Result:
+
+- PostgreSQL was running and healthy.
+- `pg_isready` reported that the database was accepting connections.
+
+Interview language:
+
+> I started the real database before integration tests because repository integration tests should prove the JPA mapping against PostgreSQL, not against a mock.
+
+### Run Full Verification
+
+```bash
+./mvnw verify
+```
+
+Why:
+
+- Runs the full Maven lifecycle through `verify`.
+- Surefire runs fast tests named like `*Tests`.
+- Failsafe runs integration tests named like `*IT`.
+
+Result:
+
+- Build passed.
+- Surefire fast tests run: `28`.
+- Failsafe integration tests run: `11`.
+- The expected duplicate-key warnings appeared during duplicate constraint tests, but they were expected test behavior, not failures.
+
+Interview language:
+
+> I used `mvn verify` because it exercises both fast tests and integration tests before a commit.
+
+### Verify Database Cleanup
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies order by table_name;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+```
+
+Why:
+
+- Confirms integration tests cleaned their data after running.
+- Confirms Flyway migration history is still healthy.
+- Confirms the database container stayed healthy during verification.
+
+Result:
+
+- `records` row count: `0`.
+- `retention_policies` row count: `0`.
+- Flyway migration version `1` was successful.
+- PostgreSQL was healthy.
+
+Interview language:
+
+> I checked the database after integration tests so the local environment stayed repeatable.
+
+### Stop PostgreSQL
+
+```bash
+docker compose down
+```
+
+Why:
+
+- Stops the local database and removes the Compose network after verification.
+
+Result:
+
+- PostgreSQL container stopped and was removed.
+- Docker Compose network was removed.
+
+Interview language:
+
+> I stopped local infrastructure after verification so no background services were left running unnecessarily.
+
+### Final Checks And Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+git add backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java backend/src/main/java/com/example/governance/records/GovernanceRecordController.java backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java backend/src/main/java/com/example/governance/records/GovernanceRecordService.java backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git diff --cached --stat
+git status --short
+git add docs/command-log.md
+git commit -m "feat: add records status filtering"
+```
+
+Why:
+
+- Confirms no whitespace errors.
+- Confirms Docker Compose is stopped.
+- Confirms only the filtering phase files are staged.
+- Records the phase as a small Git checkpoint.
+
+Result:
+
+- Whitespace check passed.
+- Docker Compose showed no running services.
+- Staged files were the records filtering source files, matching tests, and `docs/command-log.md`.
+
+Interview language:
+
+> I committed the status filtering work as its own checkpoint because it is a focused API behavior change with its own tests.

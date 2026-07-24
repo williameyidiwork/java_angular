@@ -45,11 +45,16 @@ public class GovernanceRecordService {
 		return repository.save(new GovernanceRecord(externalId, name, RecordStatus.ACTIVE, retentionPolicy));
 	}
 
-	public Page<GovernanceRecord> listRecords(int page, int size) {
+	public Page<GovernanceRecord> listRecords(int page, int size, RecordStatus status) {
 		validatePageRequest(page, size);
 
 		// Stable ordering makes API responses easier to test and easier for clients to read.
 		PageRequest pageRequest = PageRequest.of(page, size, Sort.by("externalId").ascending());
+
+		if (status != null) {
+			// Optional filter: ask the database for only records matching this status.
+			return repository.findByStatus(status, pageRequest);
+		}
 
 		// IMPORTANT: findAll(PageRequest) lets the database return only one page instead of every row.
 		return repository.findAll(pageRequest);
