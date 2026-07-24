@@ -6333,3 +6333,428 @@ Result:
 Interview language:
 
 > I committed the status filtering work as its own checkpoint because it is a focused API behavior change with its own tests.
+
+## Step 4.6: Add Records External ID Search
+
+### Official References Used
+
+- [Spring Data JPA - JPA Query Methods](https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html)
+- [Spring Framework - `@RequestParam`](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-methods/requestparam.html)
+
+Why:
+
+- Spring Data JPA query-method documentation explains keywords such as `Containing` and `IgnoreCase`.
+- `@RequestParam` documentation explains how Spring reads query parameters such as `?externalId=search`.
+
+Interview language:
+
+> I added external ID search using Spring MVC query parameters and Spring Data JPA derived query methods.
+
+### Inspect Current Records Filtering Code
+
+```bash
+git status --short
+find backend/src/main/java backend/src/test/java -type f | sort
+grep -R "findByStatus\|listRecords\|externalId" -n backend/src/main/java/com/example/governance/records backend/src/test/java/com/example/governance/records
+sed -n '1,240p' backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+sed -n '1,280p' backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java
+sed -n '1,260p' backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java
+sed -n '1,180p' backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java
+```
+
+Why:
+
+- Checks the current working tree before editing.
+- Finds the files that already know about records, status filtering, and external IDs.
+- Uses `grep` because `rg` is not available on this computer.
+
+Result:
+
+- Confirmed the search feature should extend the existing `GET /api/v1/records` endpoint.
+- Found that `listRecords(...)` needed one more optional argument for external ID search.
+
+Interview language:
+
+> I extended the existing list endpoint instead of creating a separate search endpoint, because filtering belongs naturally on the collection resource.
+
+### Add External ID Search
+
+Files updated:
+
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordService.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordController.java`
+
+Why:
+
+- `GovernanceRecordController` now accepts optional `externalId` query text.
+- `GovernanceRecordService` normalizes the search text by trimming spaces.
+- `GovernanceRecordService` now chooses between four cases:
+  - no filters
+  - status only
+  - external ID only
+  - status plus external ID together
+- `GovernanceRecordRepository` declares Spring Data methods for case-insensitive contains search.
+
+Result:
+
+- `GET /api/v1/records?externalId=search` searches external IDs.
+- `GET /api/v1/records?status=ACTIVE&externalId=search` combines both filters.
+- Search is case-insensitive.
+- Blank or whitespace-only `externalId` behaves like no external ID filter.
+
+Interview language:
+
+> The service decides which repository query to call, so the controller stays thin and the database does the filtering.
+
+### Update Tests
+
+Files updated:
+
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java`
+
+Why:
+
+- Controller tests prove query parameters are passed into the service.
+- Service tests prove the right repository method is selected.
+- Repository integration tests prove PostgreSQL really performs the case-insensitive contains search.
+
+Result:
+
+- Added controller tests for `externalId` only and `status + externalId`.
+- Added service tests for external ID search, trimming, blank search text, and combined filters.
+- Added repository integration tests for external ID search and combined filters.
+
+Interview language:
+
+> I tested external ID search at the HTTP layer, business layer, and database layer.
+
+### Check For Old Method Calls
+
+```bash
+grep -R "listRecords(" -n backend/src/main/java backend/src/test/java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java
+sed -n '1,300p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,240p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+```
+
+Why:
+
+- Confirms every call to `listRecords(...)` uses the new four-argument signature.
+- Reviews the changed production files after editing.
+
+Result:
+
+- No old three-argument calls remained.
+- Production code showed the expected optional `status` and `externalId` filters.
+
+Interview language:
+
+> After changing a method signature, I searched all usages so the project still compiled consistently.
+
+### Locate The Maven Wrapper
+
+```bash
+./mvnw -Dtest=GovernanceRecordServiceTests,GovernanceRecordControllerTests test
+find . -maxdepth 3 -name mvnw -o -name pom.xml
+ls -la
+ls -la backend
+```
+
+Why:
+
+- I first tried `./mvnw` from the repository root.
+- That failed because the Maven wrapper is inside `backend`, not at the root.
+- The `find` command located `backend/mvnw` and `backend/pom.xml`.
+
+Result:
+
+- Root command failed with `zsh:1: no such file or directory: ./mvnw`.
+- Confirmed Maven commands should run from `/Users/williameyidi/Documents/java and angular/backend`.
+
+Interview language:
+
+> The Maven wrapper belongs to the backend module, so I run Maven commands from the backend directory.
+
+### Run Focused Records Tests
+
+```bash
+cd backend
+./mvnw -Dtest=GovernanceRecordServiceTests,GovernanceRecordControllerTests test
+```
+
+Why:
+
+- Runs only the fast tests touched by this phase.
+- Gives quick feedback before running every test.
+
+Result:
+
+- Build passed.
+- Tests run: `24`.
+- Failures: `0`.
+- Errors: `0`.
+- Skipped: `0`.
+
+Interview language:
+
+> I ran the focused records tests first because they validate the files touched by the feature.
+
+### Run The Full Fast Test Suite
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Runs all fast unit and web tests handled by Maven Surefire.
+- Does not require starting the Spring Boot app manually.
+
+Result:
+
+- Build passed.
+- Tests run: `34`.
+- Failures: `0`.
+- Errors: `0`.
+- Skipped: `0`.
+
+Interview language:
+
+> After the focused tests passed, I ran the full fast suite to catch regressions outside the records package.
+
+### Start PostgreSQL And Run Integration Verification
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+cd backend
+./mvnw verify
+```
+
+Why:
+
+- Starts the real PostgreSQL database required by repository integration tests.
+- `pg_isready` checks that PostgreSQL accepts connections.
+- `mvn verify` runs both fast tests and integration tests.
+
+Result:
+
+- PostgreSQL started and became healthy.
+- `pg_isready` reported the database was accepting connections.
+- Build passed.
+- Surefire fast tests run: `34`.
+- Failsafe integration tests run: `13`.
+- Duplicate-key warnings appeared in expected duplicate constraint tests, but the tests passed.
+
+Interview language:
+
+> I used `mvn verify` with PostgreSQL running so the new repository search methods were tested against the real database.
+
+### Prepare Manual Curl Verification
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "delete from records; delete from retention_policies;"
+sed -n '1,220p' backend/src/main/resources/application.properties
+docker compose ps
+cd backend
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+Why:
+
+- Cleans previous manual data.
+- Reads `application.properties` to confirm the app connects to PostgreSQL on localhost.
+- Starts the API for manual HTTP testing.
+
+Result:
+
+- Manual tables started empty.
+- The first app start failed because port `8081` was already in use.
+
+Interview language:
+
+> When the preferred port was busy, I did not kill an unknown process; I checked ports and used another port.
+
+### Switch To A Free Local Port
+
+```bash
+lsof -nP -iTCP:8081 -sTCP:LISTEN
+lsof -nP -iTCP:8082 -sTCP:LISTEN
+cd backend
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8082
+```
+
+Why:
+
+- Checks which process owns port `8081`.
+- Confirms port `8082` is free.
+- Starts this backend version on `8082`.
+
+Result:
+
+- Port `8081` had an existing Java process.
+- Port `8082` was free.
+- Spring Boot started on port `8082`.
+
+Interview language:
+
+> I avoided disturbing another local process and ran this verification on an available port.
+
+### Handle Local Curl Sandbox Access
+
+```bash
+curl -sS -i -X POST http://127.0.0.1:8082/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-SEARCH-001","name":"Search Record One"}'
+lsof -nP -iTCP:8082 -sTCP:LISTEN
+curl -sS -i http://localhost:8082/actuator/health
+curl -g -sS -i 'http://[::1]:8082/actuator/health'
+curl -sS -i http://localhost:8082/actuator/health
+```
+
+Why:
+
+- Initial local curl attempts failed from the restricted shell even though Java was listening on `8082`.
+- `lsof` confirmed the app was still running.
+- The health check succeeded after allowing local curl access.
+
+Result:
+
+- Health endpoint returned HTTP `200`.
+- Health JSON showed status `UP`, including database status `UP`.
+
+Interview language:
+
+> The server was running, but the shell needed permission to make local network requests. After allowing local curl access, the API health check passed.
+
+### Create Manual Records With Curl
+
+```bash
+curl -sS -i -X POST http://localhost:8082/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-SEARCH-001","name":"Search Record One"}'
+curl -sS -i -X POST http://localhost:8082/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-SEARCH-002","name":"Search Record Two"}'
+curl -sS -i -X POST http://localhost:8082/api/v1/records -H 'Content-Type: application/json' -d '{"externalId":"REC-OTHER-003","name":"Other Record"}'
+```
+
+Why:
+
+- Creates two records that should match `externalId=search`.
+- Creates one record that should not match `externalId=search`.
+
+Result:
+
+- All three requests returned HTTP `201 Created`.
+- Created records:
+  - `REC-SEARCH-001`
+  - `REC-SEARCH-002`
+  - `REC-OTHER-003`
+
+Interview language:
+
+> I created controlled sample data so the expected search result was obvious.
+
+### Verify External ID Search With Curl
+
+```bash
+curl -sS -i 'http://localhost:8082/api/v1/records?page=0&size=10'
+curl -sS -i 'http://localhost:8082/api/v1/records?page=0&size=10&externalId=search'
+curl -sS -i 'http://localhost:8082/api/v1/records?page=0&size=1&status=ACTIVE&externalId=search'
+curl -sS -i 'http://localhost:8082/api/v1/records?page=0&size=10&externalId=missing'
+```
+
+Why:
+
+- First request proves there are three records before filtering.
+- `externalId=search` proves case-insensitive contains search.
+- `status=ACTIVE&externalId=search` proves search combines with status and pagination.
+- `externalId=missing` proves a no-match search returns an empty page.
+
+Result:
+
+- Unfiltered request returned `totalElements: 3`.
+- `externalId=search` returned `REC-SEARCH-001` and `REC-SEARCH-002`, with `totalElements: 2`.
+- `status=ACTIVE&externalId=search&page=0&size=1` returned one item on the first page, with `totalElements: 2` and `totalPages: 2`.
+- `externalId=missing` returned `content: []` and `totalElements: 0`.
+
+Interview language:
+
+> I manually verified the API by creating sample records, then calling the same endpoint with and without filters.
+
+### Verify Database Rows And Clean Up
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select external_id, name, status from records order by external_id;"
+docker compose exec -T postgres psql -U governance -d governance -c "select count(*) as record_count from records;"
+docker compose ps
+docker compose exec -T postgres psql -U governance -d governance -c "delete from records; delete from retention_policies;"
+kill 40244
+kill 40244
+lsof -nP -iTCP:8082 -sTCP:LISTEN
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies order by table_name;"
+docker compose ps
+docker compose down
+```
+
+Why:
+
+- Confirms the manual curl creates really wrote rows to PostgreSQL.
+- Deletes manual sample records after verification.
+- Stops only the Spring Boot process started on port `8082`.
+- Confirms port `8082` is closed.
+- Confirms business tables are empty again.
+- Stops PostgreSQL.
+
+Result:
+
+- Database showed three manual records before cleanup.
+- Manual cleanup deleted `3` records and `0` retention policies.
+- First `kill 40244` attempt was blocked by the sandbox.
+- The same stop command succeeded after allowing it for the Spring Boot process started during this test.
+- Port `8082` closed.
+- `records` row count after cleanup: `0`.
+- `retention_policies` row count after cleanup: `0`.
+- Docker Compose stopped PostgreSQL and removed the network.
+
+Interview language:
+
+> I verified persistence directly in PostgreSQL, then cleaned the test data and stopped local infrastructure.
+
+### Final Checks And Commit
+
+```bash
+git diff --check
+docker compose ps
+lsof -nP -iTCP:8082 -sTCP:LISTEN
+git status --short
+git diff --stat
+tail -n 300 docs/command-log.md
+git add backend/src/main/java/com/example/governance/records/GovernanceRecordController.java backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java backend/src/main/java/com/example/governance/records/GovernanceRecordService.java backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git diff --cached --stat
+git status --short
+git add docs/command-log.md
+git commit -m "feat: add records external id search"
+```
+
+Why:
+
+- Confirms no whitespace errors before staging.
+- Confirms Docker Compose is stopped.
+- Confirms the manual Spring Boot test port is closed.
+- Stages the production code, tests, and command log for this phase.
+- Creates a small Git checkpoint.
+
+Result:
+
+- Whitespace check passed.
+- Docker Compose showed no running services.
+- Port `8082` was closed.
+
+Interview language:
+
+> I committed the external ID search phase separately because it is a focused API search enhancement with its own tests and manual verification.

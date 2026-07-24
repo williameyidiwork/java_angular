@@ -17,4 +17,14 @@ public interface GovernanceRecordRepository extends JpaRepository<GovernanceReco
 
 	// Spring Data creates a paginated query using the status field.
 	Page<GovernanceRecord> findByStatus(RecordStatus status, Pageable pageable);
+
+	// Spring Data creates a case-insensitive search on externalId using a SQL LIKE pattern.
+	Page<GovernanceRecord> findByExternalIdContainingIgnoreCase(String externalId, Pageable pageable);
+
+	// Spring Data combines both filters when the client sends status and externalId together.
+	Page<GovernanceRecord> findByStatusAndExternalIdContainingIgnoreCase(
+			RecordStatus status,
+			String externalId,
+			Pageable pageable
+	);
 }

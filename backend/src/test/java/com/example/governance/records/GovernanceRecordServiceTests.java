@@ -121,7 +121,7 @@ class GovernanceRecordServiceTests {
 	}
 
 	@Test
-	void listsPagedRecordsByExternalId() {
+	void listsPagedRecordsWithoutFilters() {
 		// Arrange: expected records and expected page request.
 		List<GovernanceRecord> records = List.of(
 				new GovernanceRecord("REC-100", "Finance", RecordStatus.ACTIVE, null),
@@ -131,7 +131,7 @@ class GovernanceRecordServiceTests {
 		when(repository.findAll(pageRequest)).thenReturn(new PageImpl<>(records, pageRequest, 5));
 
 		// Act: call the real service list method.
-		Page<GovernanceRecord> result = service.listRecords(0, 2, null);
+		Page<GovernanceRecord> result = service.listRecords(0, 2, null, null);
 
 		// Assert: result came from repository using the expected stable sort.
 		assertEquals(records, result.getContent());
@@ -152,7 +152,7 @@ class GovernanceRecordServiceTests {
 				.thenReturn(new PageImpl<>(records, pageRequest, 1));
 
 		// Act: call the real service list method with a status filter.
-		Page<GovernanceRecord> result = service.listRecords(0, 20, RecordStatus.ARCHIVED);
+		Page<GovernanceRecord> result = service.listRecords(0, 20, RecordStatus.ARCHIVED, null);
 
 		// Assert: service used the filtered repository method instead of unfiltered findAll.
 		assertEquals(records, result.getContent());
@@ -162,11 +162,89 @@ class GovernanceRecordServiceTests {
 	}
 
 	@Test
+	void searchesPagedRecordsByExternalId() {
+		// Arrange: expected records and expected page request.
+		List<GovernanceRecord> records = List.of(
+				new GovernanceRecord("REC-API-001", "API Search Record", RecordStatus.ACTIVE, null)
+		);
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(repository.findByExternalIdContainingIgnoreCase("rec-api", pageRequest))
+				.thenReturn(new PageImpl<>(records, pageRequest, 1));
+
+		// Act: call the real service list method with externalId search text.
+		Page<GovernanceRecord> result = service.listRecords(0, 20, null, "rec-api");
+
+		// Assert: service used the search repository method instead of unfiltered findAll.
+		assertEquals(records, result.getContent());
+		assertEquals(1, result.getTotalElements());
+		verify(repository).findByExternalIdContainingIgnoreCase("rec-api", pageRequest);
+		verify(repository, never()).findAll(any(PageRequest.class));
+	}
+
+	@Test
+	void trimsExternalIdSearchBeforeQuerying() {
+		// Arrange: the client accidentally included spaces around the search text.
+		List<GovernanceRecord> records = List.of(
+				new GovernanceRecord("REC-TRIM-001", "Trimmed Search Record", RecordStatus.ACTIVE, null)
+		);
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(repository.findByExternalIdContainingIgnoreCase("REC-TRIM", pageRequest))
+				.thenReturn(new PageImpl<>(records, pageRequest, 1));
+
+		// Act: service normalizes the search text before asking the repository.
+		Page<GovernanceRecord> result = service.listRecords(0, 20, null, "  REC-TRIM  ");
+
+		// Assert: repository receives trimmed search text.
+		assertEquals(records, result.getContent());
+		verify(repository).findByExternalIdContainingIgnoreCase("REC-TRIM", pageRequest);
+	}
+
+	@Test
+	void treatsBlankExternalIdSearchAsNoFilter() {
+		// Arrange: blank search text should behave like the client did not send externalId.
+		List<GovernanceRecord> records = List.of(
+				new GovernanceRecord("REC-100", "Finance", RecordStatus.ACTIVE, null)
+		);
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(repository.findAll(pageRequest)).thenReturn(new PageImpl<>(records, pageRequest, 1));
+
+		// Act: whitespace-only search text is ignored.
+		Page<GovernanceRecord> result = service.listRecords(0, 20, null, "   ");
+
+		// Assert: service used the normal paginated query.
+		assertEquals(records, result.getContent());
+		verify(repository).findAll(pageRequest);
+		verify(repository, never()).findByExternalIdContainingIgnoreCase(any(String.class), any(PageRequest.class));
+	}
+
+	@Test
+	void listsPagedRecordsByStatusAndExternalId() {
+		// Arrange: expected records when both status and externalId filters are present.
+		List<GovernanceRecord> records = List.of(
+				new GovernanceRecord("REC-CONTRACT-002", "Archived Contract", RecordStatus.ARCHIVED, null)
+		);
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(repository.findByStatusAndExternalIdContainingIgnoreCase(RecordStatus.ARCHIVED, "contract", pageRequest))
+				.thenReturn(new PageImpl<>(records, pageRequest, 1));
+
+		// Act: call the real service with both filters.
+		Page<GovernanceRecord> result = service.listRecords(0, 20, RecordStatus.ARCHIVED, "contract");
+
+		// Assert: service used the combined query so both filters apply in the database.
+		assertEquals(records, result.getContent());
+		assertEquals(1, result.getTotalElements());
+		verify(repository).findByStatusAndExternalIdContainingIgnoreCase(RecordStatus.ARCHIVED, "contract", pageRequest);
+		verify(repository, never()).findByStatus(any(RecordStatus.class), any(PageRequest.class));
+		verify(repository, never()).findByExternalIdContainingIgnoreCase(any(String.class), any(PageRequest.class));
+		verify(repository, never()).findAll(any(PageRequest.class));
+	}
+
+	@Test
 	void rejectsNegativePageNumber() {
 		// Act and assert: page numbers are zero-based, so negative numbers are invalid.
 		InvalidRecordPageRequestException exception = assertThrows(
 				InvalidRecordPageRequestException.class,
-				() -> service.listRecords(-1, 20, null)
+				() -> service.listRecords(-1, 20, null, null)
 		);
 
 		assertEquals("Page index must be zero or greater.", exception.getMessage());
@@ -178,7 +256,7 @@ class GovernanceRecordServiceTests {
 		// Act and assert: size must be at least 1 because a page with 0 rows is not useful.
 		InvalidRecordPageRequestException exception = assertThrows(
 				InvalidRecordPageRequestException.class,
-				() -> service.listRecords(0, 0, null)
+				() -> service.listRecords(0, 0, null, null)
 		);
 
 		assertEquals("Page size must be between 1 and 100.", exception.getMessage());
@@ -190,7 +268,7 @@ class GovernanceRecordServiceTests {
 		// Act and assert: cap page size so one request cannot ask for too many rows.
 		InvalidRecordPageRequestException exception = assertThrows(
 				InvalidRecordPageRequestException.class,
-				() -> service.listRecords(0, 101, null)
+				() -> service.listRecords(0, 101, null, null)
 		);
 
 		assertEquals("Page size must be between 1 and 100.", exception.getMessage());

@@ -45,19 +45,40 @@ public class GovernanceRecordService {
 		return repository.save(new GovernanceRecord(externalId, name, RecordStatus.ACTIVE, retentionPolicy));
 	}
 
-	public Page<GovernanceRecord> listRecords(int page, int size, RecordStatus status) {
+	public Page<GovernanceRecord> listRecords(int page, int size, RecordStatus status, String externalId) {
 		validatePageRequest(page, size);
 
 		// Stable ordering makes API responses easier to test and easier for clients to read.
 		PageRequest pageRequest = PageRequest.of(page, size, Sort.by("externalId").ascending());
+		String externalIdSearch = normalizeExternalIdSearch(externalId);
+
+		if (status != null && externalIdSearch != null) {
+			// Combined filters: useful when clients want one status within one external ID pattern.
+			return repository.findByStatusAndExternalIdContainingIgnoreCase(status, externalIdSearch, pageRequest);
+		}
 
 		if (status != null) {
 			// Optional filter: ask the database for only records matching this status.
 			return repository.findByStatus(status, pageRequest);
 		}
 
+		if (externalIdSearch != null) {
+			// Optional search: match any external ID containing the provided text, ignoring case.
+			return repository.findByExternalIdContainingIgnoreCase(externalIdSearch, pageRequest);
+		}
+
 		// IMPORTANT: findAll(PageRequest) lets the database return only one page instead of every row.
 		return repository.findAll(pageRequest);
+	}
+
+	private String normalizeExternalIdSearch(String externalId) {
+		// Treat null, empty, and whitespace-only search text as "no externalId filter".
+		if (externalId == null || externalId.isBlank()) {
+			return null;
+		}
+
+		// Trim spaces so externalId= REC-100  behaves like externalId=REC-100.
+		return externalId.trim();
 	}
 
 	private RetentionPolicy findRetentionPolicy(UUID retentionPolicyId) {

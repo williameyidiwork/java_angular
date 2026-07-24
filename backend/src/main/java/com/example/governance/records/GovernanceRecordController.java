@@ -44,7 +44,7 @@ public class GovernanceRecordController {
 	}
 
 	// Handles GET /api/v1/records.
-	// Example: GET /api/v1/records?page=0&size=20&status=ACTIVE
+	// Example: GET /api/v1/records?page=0&size=20&status=ACTIVE&externalId=REC
 	@GetMapping
 	public PageResponse<GovernanceRecordResponse> listRecords(
 			// page is zero-based: page=0 means the first page.
@@ -52,10 +52,12 @@ public class GovernanceRecordController {
 			// size controls the maximum number of rows returned in one response.
 			@RequestParam(defaultValue = "20") int size,
 			// Optional filter: when present, only records with this lifecycle status are returned.
-			@RequestParam(required = false) RecordStatus status
+			@RequestParam(required = false) RecordStatus status,
+			// Optional search: when present, match records whose external ID contains this text.
+			@RequestParam(required = false) String externalId
 	) {
 		// Ask the service for one page, then convert each entity into response JSON.
-		Page<GovernanceRecordResponse> records = service.listRecords(page, size, status)
+		Page<GovernanceRecordResponse> records = service.listRecords(page, size, status, externalId)
 				.map(GovernanceRecordResponse::from);
 
 		// Wrap the page metadata in a stable API response shape.

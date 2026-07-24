@@ -107,6 +107,47 @@ class GovernanceRecordRepositoryIT {
 	}
 
 	@Test
+	void findsRecordsByExternalIdSearchWithPaging() {
+		// Arrange: save records where only two external IDs contain "alpha".
+		repository.saveAndFlush(new GovernanceRecord("REC-ALPHA-001", "Alpha Record One", RecordStatus.ACTIVE, null));
+		repository.saveAndFlush(new GovernanceRecord("REC-BETA-001", "Beta Record", RecordStatus.ACTIVE, null));
+		repository.saveAndFlush(new GovernanceRecord("EXT-ALPHA-002", "Alpha Record Two", RecordStatus.ACTIVE, null));
+
+		// Act: ask PostgreSQL for external IDs containing "alpha", ignoring case.
+		Page<GovernanceRecord> alphaRecords = repository.findByExternalIdContainingIgnoreCase(
+				"alpha",
+				PageRequest.of(0, 10, Sort.by("externalId").ascending())
+		);
+
+		// Assert: the database applied a case-insensitive contains search and kept sort order.
+		assertEquals(2, alphaRecords.getContent().size());
+		assertEquals("EXT-ALPHA-002", alphaRecords.getContent().getFirst().getExternalId());
+		assertEquals("REC-ALPHA-001", alphaRecords.getContent().get(1).getExternalId());
+		assertEquals(2, alphaRecords.getTotalElements());
+	}
+
+	@Test
+	void findsRecordsByStatusAndExternalIdSearchWithPaging() {
+		// Arrange: only one record is both ARCHIVED and contains "case" in the external ID.
+		repository.saveAndFlush(new GovernanceRecord("REC-CASE-001", "Active Case Record", RecordStatus.ACTIVE, null));
+		repository.saveAndFlush(new GovernanceRecord("REC-CASE-002", "Archived Case Record", RecordStatus.ARCHIVED, null));
+		repository.saveAndFlush(new GovernanceRecord("REC-OTHER-003", "Archived Other Record", RecordStatus.ARCHIVED, null));
+
+		// Act: ask PostgreSQL to apply both filters in the same query.
+		Page<GovernanceRecord> archivedCaseRecords = repository.findByStatusAndExternalIdContainingIgnoreCase(
+				RecordStatus.ARCHIVED,
+				"case",
+				PageRequest.of(0, 10, Sort.by("externalId").ascending())
+		);
+
+		// Assert: the database returned the one row matching both filters.
+		assertEquals(1, archivedCaseRecords.getContent().size());
+		assertEquals("REC-CASE-002", archivedCaseRecords.getContent().getFirst().getExternalId());
+		assertEquals(RecordStatus.ARCHIVED, archivedCaseRecords.getContent().getFirst().getStatus());
+		assertEquals(1, archivedCaseRecords.getTotalElements());
+	}
+
+	@Test
 	void rejectsDuplicateExternalId() {
 		// The database unique constraint protects us even if application code misses a duplicate.
 		// Arrange: save the first record.

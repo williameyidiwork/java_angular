@@ -67,7 +67,7 @@ class GovernanceRecordControllerTests {
 	void listRecordsReturnsFirstPageFromService() throws Exception {
 		// Arrange: the fake service returns two records.
 		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
-		when(service.listRecords(0, 20, null)).thenReturn(new PageImpl<>(List.of(
+		when(service.listRecords(0, 20, null, null)).thenReturn(new PageImpl<>(List.of(
 				new GovernanceRecord("REC-100", "Finance Report", RecordStatus.ACTIVE, null),
 				new GovernanceRecord("REC-200", "Legal Contract", RecordStatus.ACTIVE, null)
 		), pageRequest, 2));
@@ -87,14 +87,14 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.last").value(true));
 
 		// Assert: controller asked the service for the list.
-		verify(service).listRecords(0, 20, null);
+		verify(service).listRecords(0, 20, null, null);
 	}
 
 	@Test
 	void listRecordsUsesRequestedPageAndSize() throws Exception {
 		// Arrange: page=1 and size=1 means the client wants the second page with one item.
 		PageRequest pageRequest = PageRequest.of(1, 1, Sort.by("externalId").ascending());
-		when(service.listRecords(1, 1, null)).thenReturn(new PageImpl<>(List.of(
+		when(service.listRecords(1, 1, null, null)).thenReturn(new PageImpl<>(List.of(
 				new GovernanceRecord("REC-200", "Legal Contract", RecordStatus.ACTIVE, null)
 		), pageRequest, 2));
 
@@ -111,14 +111,14 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.first").value(false))
 				.andExpect(jsonPath("$.last").value(true));
 
-		verify(service).listRecords(1, 1, null);
+		verify(service).listRecords(1, 1, null, null);
 	}
 
 	@Test
 	void listRecordsUsesStatusFilterWhenProvided() throws Exception {
 		// Arrange: status=ARCHIVED means the client only wants archived records.
 		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
-		when(service.listRecords(0, 20, RecordStatus.ARCHIVED)).thenReturn(new PageImpl<>(List.of(
+		when(service.listRecords(0, 20, RecordStatus.ARCHIVED, null)).thenReturn(new PageImpl<>(List.of(
 				new GovernanceRecord("REC-300", "Archived Contract", RecordStatus.ARCHIVED, null)
 		), pageRequest, 1));
 
@@ -132,13 +132,54 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.size").value(20))
 				.andExpect(jsonPath("$.totalElements").value(1));
 
-		verify(service).listRecords(0, 20, RecordStatus.ARCHIVED);
+		verify(service).listRecords(0, 20, RecordStatus.ARCHIVED, null);
+	}
+
+	@Test
+	void listRecordsUsesExternalIdSearchWhenProvided() throws Exception {
+		// Arrange: externalId=rec-api means the client wants matching external IDs.
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(service.listRecords(0, 20, null, "rec-api")).thenReturn(new PageImpl<>(List.of(
+				new GovernanceRecord("REC-API-001", "API Search Record", RecordStatus.ACTIVE, null)
+		), pageRequest, 1));
+
+		// Act and assert: controller passes the externalId query parameter into the service.
+		mockMvc.perform(get("/api/v1/records")
+						.param("externalId", "rec-api"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.content[0].externalId").value("REC-API-001"))
+				.andExpect(jsonPath("$.content[0].status").value("ACTIVE"))
+				.andExpect(jsonPath("$.page").value(0))
+				.andExpect(jsonPath("$.size").value(20))
+				.andExpect(jsonPath("$.totalElements").value(1));
+
+		verify(service).listRecords(0, 20, null, "rec-api");
+	}
+
+	@Test
+	void listRecordsUsesStatusAndExternalIdFiltersTogether() throws Exception {
+		// Arrange: both query parameters should be passed together to the service.
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(service.listRecords(0, 20, RecordStatus.ARCHIVED, "contract")).thenReturn(new PageImpl<>(List.of(
+				new GovernanceRecord("REC-CONTRACT-002", "Archived Contract", RecordStatus.ARCHIVED, null)
+		), pageRequest, 1));
+
+		// Act and assert: controller keeps status filtering and externalId searching together.
+		mockMvc.perform(get("/api/v1/records")
+						.param("status", "ARCHIVED")
+						.param("externalId", "contract"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.content[0].externalId").value("REC-CONTRACT-002"))
+				.andExpect(jsonPath("$.content[0].status").value("ARCHIVED"))
+				.andExpect(jsonPath("$.totalElements").value(1));
+
+		verify(service).listRecords(0, 20, RecordStatus.ARCHIVED, "contract");
 	}
 
 	@Test
 	void listRecordsReturnsBadRequestForInvalidPagination() throws Exception {
 		// Arrange: the fake service applies the same pagination rule as the real service.
-		when(service.listRecords(-1, 20, null))
+		when(service.listRecords(-1, 20, null, null))
 				.thenThrow(new InvalidRecordPageRequestException("Page index must be zero or greater."));
 
 		// Act and assert: invalid pagination becomes structured 400 JSON.
@@ -150,7 +191,7 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.message").value("Page index must be zero or greater."))
 				.andExpect(jsonPath("$.path").value("/api/v1/records"));
 
-		verify(service).listRecords(-1, 20, null);
+		verify(service).listRecords(-1, 20, null, null);
 	}
 
 	@Test
