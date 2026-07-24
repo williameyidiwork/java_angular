@@ -6,6 +6,7 @@ import java.util.UUID;
 public class RetentionPolicyNotFoundException extends RuntimeException {
 
 	public RetentionPolicyNotFoundException(UUID retentionPolicyId) {
+		// The message is reused by ApiExceptionHandler when it builds the 404 JSON response.
 		super("Retention policy not found: " + retentionPolicyId);
 	}
 }

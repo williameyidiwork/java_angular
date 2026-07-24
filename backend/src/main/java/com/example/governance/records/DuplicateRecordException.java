@@ -4,6 +4,7 @@ package com.example.governance.records;
 public class DuplicateRecordException extends RuntimeException {
 
 	public DuplicateRecordException(String externalId) {
+		// The message is reused by ApiExceptionHandler when it builds the 409 JSON response.
 		super("Record already exists: " + externalId);
 	}
 }

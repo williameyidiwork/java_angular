@@ -19,21 +19,26 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // Integration test: real Spring Boot app plus real PostgreSQL.
+// IMPORTANT: This test proves JPA mappings work with the real schema, not with mocks.
 @SpringBootTest
 class GovernanceRecordRepositoryIT {
 
+	// Real Spring Data repository connected to PostgreSQL.
 	@Autowired
 	private GovernanceRecordRepository repository;
 
+	// Real retention repository used to create parent retention_policy rows.
 	@Autowired
 	private RetentionPolicyRepository retentionPolicyRepository;
 
+	// JdbcTemplate lets the test run small SQL checks directly against PostgreSQL.
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
 
 	@BeforeEach
 	@AfterEach
 	void cleanTables() {
+		// Run before and after each test so one test cannot leak data into another test.
 		// Delete child table first because records can reference retention_policies.
 		jdbcTemplate.update("delete from records");
 		jdbcTemplate.update("delete from retention_policies");
@@ -42,12 +47,15 @@ class GovernanceRecordRepositoryIT {
 	@Test
 	void savesAndFindsRecordByExternalId() {
 		// saveAndFlush writes immediately, so the next query proves PostgreSQL can read it back.
+		// Arrange and act: save one record through JPA.
 		GovernanceRecord saved = repository.saveAndFlush(
 				new GovernanceRecord("REC-100", "Quarterly Finance Report", RecordStatus.ACTIVE, null)
 		);
 
+		// Act: use the custom Spring Data query method.
 		Optional<GovernanceRecord> found = repository.findByExternalId("REC-100");
 
+		// Assert: the row was saved, assigned an ID, and read back correctly.
 		assertTrue(found.isPresent());
 		assertNotNull(saved.getId());
 		assertEquals(saved.getId(), found.get().getId());
@@ -58,11 +66,14 @@ class GovernanceRecordRepositoryIT {
 	@Test
 	void savesRecordWithRetentionPolicyReference() {
 		// First create the parent row, then create a record that points to it.
+		// Arrange: create the retention policy that the record will reference.
 		RetentionPolicy policy = retentionPolicyRepository.saveAndFlush(
 				new RetentionPolicy("Finance Seven Years", "Keep finance records for seven years.", 2555)
 		);
+		// Act: save a record with the parent policy object.
 		repository.saveAndFlush(new GovernanceRecord("REC-200", "Invoice Batch", RecordStatus.ACTIVE, policy));
 
+		// Assert with SQL: verify the foreign-key column contains the expected policy ID.
 		UUID storedPolicyId = jdbcTemplate.queryForObject(
 				"select retention_policy_id from records where external_id = ?",
 				UUID.class,
@@ -75,8 +86,10 @@ class GovernanceRecordRepositoryIT {
 	@Test
 	void rejectsDuplicateExternalId() {
 		// The database unique constraint protects us even if application code misses a duplicate.
+		// Arrange: save the first record.
 		repository.saveAndFlush(new GovernanceRecord("REC-300", "Original Record", RecordStatus.ACTIVE, null));
 
+		// Act and assert: saving another row with the same external_id fails.
 		assertThrows(DataIntegrityViolationException.class, () ->
 				repository.saveAndFlush(new GovernanceRecord("REC-300", "Duplicate Record", RecordStatus.ACTIVE, null))
 		);

@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.Comparator;
 import java.util.List;
 
+// Central place that translates Java exceptions into professional API error responses.
+// IMPORTANT: Controllers should not duplicate this error-response logic.
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
@@ -22,6 +24,7 @@ public class ApiExceptionHandler {
 			DuplicateRetentionPolicyException exception,
 			HttpServletRequest request
 	) {
+		// Build one consistent JSON body for the client.
 		ApiErrorResponse response = ApiErrorResponse.of(
 				HttpStatus.CONFLICT,
 				exception.getMessage(),
@@ -37,6 +40,7 @@ public class ApiExceptionHandler {
 			DuplicateRecordException exception,
 			HttpServletRequest request
 	) {
+		// 409 means the request conflicts with current server state.
 		ApiErrorResponse response = ApiErrorResponse.of(
 				HttpStatus.CONFLICT,
 				exception.getMessage(),
@@ -52,6 +56,7 @@ public class ApiExceptionHandler {
 			RetentionPolicyNotFoundException exception,
 			HttpServletRequest request
 	) {
+		// 404 means the client referenced a resource ID that the system cannot find.
 		ApiErrorResponse response = ApiErrorResponse.of(
 				HttpStatus.NOT_FOUND,
 				exception.getMessage(),
@@ -67,13 +72,16 @@ public class ApiExceptionHandler {
 			MethodArgumentNotValidException exception,
 			HttpServletRequest request
 	) {
+		// Collect validation errors from annotations such as @NotBlank and @Size.
 		List<FieldValidationError> fieldErrors = exception.getBindingResult()
 				.getFieldErrors()
 				.stream()
 				.map(fieldError -> new FieldValidationError(fieldError.getField(), fieldError.getDefaultMessage()))
+				// IMPORTANT: Sort errors so tests and clients see a stable order.
 				.sorted(Comparator.comparing(FieldValidationError::field))
 				.toList();
 
+		// Return the same error shape as other API failures, plus field-level details.
 		ApiErrorResponse response = ApiErrorResponse.validation(
 				"Request validation failed",
 				request.getRequestURI(),

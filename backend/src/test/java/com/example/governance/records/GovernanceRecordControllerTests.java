@@ -20,13 +20,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 // Web test: real controller plus fake service.
+// IMPORTANT: This tests the HTTP layer without starting the full application server.
 @WebMvcTest(GovernanceRecordController.class)
+// Brings in the shared error handler so validation and service errors produce real API error JSON.
 @Import(ApiExceptionHandler.class)
 class GovernanceRecordControllerTests {
 
+	// MockMvc lets the test perform fake HTTP requests against the controller.
 	@Autowired
 	private MockMvc mockMvc;
 
+	// The service is mocked so this file only tests controller behavior.
 	@MockitoBean
 	private GovernanceRecordService service;
 
@@ -36,6 +40,7 @@ class GovernanceRecordControllerTests {
 		when(service.createRecord("REC-100", "Quarterly Finance Report", null))
 				.thenReturn(new GovernanceRecord("REC-100", "Quarterly Finance Report", RecordStatus.ACTIVE, null));
 
+		// Act: send JSON to POST /api/v1/records.
 		mockMvc.perform(post("/api/v1/records")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -44,21 +49,25 @@ class GovernanceRecordControllerTests {
 								  "name": "Quarterly Finance Report"
 								}
 								"""))
+				// Assert: controller returns 201 and the expected response JSON.
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.externalId").value("REC-100"))
 				.andExpect(jsonPath("$.name").value("Quarterly Finance Report"))
 				.andExpect(jsonPath("$.status").value("ACTIVE"));
 
+		// Assert: controller passed the correct values to the service.
 		verify(service).createRecord("REC-100", "Quarterly Finance Report", null);
 	}
 
 	@Test
 	void listRecordsReturnsRecordsFromService() throws Exception {
+		// Arrange: the fake service returns two records.
 		when(service.listRecords()).thenReturn(List.of(
 				new GovernanceRecord("REC-100", "Finance Report", RecordStatus.ACTIVE, null),
 				new GovernanceRecord("REC-200", "Legal Contract", RecordStatus.ACTIVE, null)
 		));
 
+		// Act and assert: GET returns a JSON array in the same order as the service result.
 		mockMvc.perform(get("/api/v1/records"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].externalId").value("REC-100"))
@@ -66,12 +75,14 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$[1].externalId").value("REC-200"))
 				.andExpect(jsonPath("$[1].name").value("Legal Contract"));
 
+		// Assert: controller asked the service for the list.
 		verify(service).listRecords();
 	}
 
 	@Test
 	void createRecordRejectsInvalidRequest() throws Exception {
 		// Empty strings violate @NotBlank on CreateRecordRequest.
+		// IMPORTANT: The service is not mocked here because validation should stop before service logic.
 		mockMvc.perform(post("/api/v1/records")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -80,6 +91,7 @@ class GovernanceRecordControllerTests {
 								  "name": ""
 								}
 								"""))
+				// Assert: ApiExceptionHandler converts validation errors into structured 400 JSON.
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.error").value("Bad Request"))
@@ -95,6 +107,7 @@ class GovernanceRecordControllerTests {
 		when(service.createRecord("REC-300", "Duplicate Record", null))
 				.thenThrow(new DuplicateRecordException("REC-300"));
 
+		// Act and assert: duplicate records become HTTP 409 Conflict.
 		mockMvc.perform(post("/api/v1/records")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -109,6 +122,7 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.message").value("Record already exists: REC-300"))
 				.andExpect(jsonPath("$.path").value("/api/v1/records"));
 
+		// Assert: the controller sent the parsed JSON values into the service.
 		verify(service).createRecord("REC-300", "Duplicate Record", null);
 	}
 
@@ -119,6 +133,7 @@ class GovernanceRecordControllerTests {
 		when(service.createRecord("REC-400", "Unknown Policy Record", missingPolicyId))
 				.thenThrow(new RetentionPolicyNotFoundException(missingPolicyId));
 
+		// Act and assert: a missing related resource becomes HTTP 404 Not Found.
 		mockMvc.perform(post("/api/v1/records")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -134,6 +149,7 @@ class GovernanceRecordControllerTests {
 				.andExpect(jsonPath("$.message").value("Retention policy not found: " + missingPolicyId))
 				.andExpect(jsonPath("$.path").value("/api/v1/records"));
 
+		// Assert: the UUID string from JSON was converted to a UUID object.
 		verify(service).createRecord("REC-400", "Unknown Policy Record", missingPolicyId);
 	}
 }

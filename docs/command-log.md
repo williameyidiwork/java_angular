@@ -5027,3 +5027,167 @@ Result:
 Interview language:
 
 > I committed the records feature as one vertical slice because the entity, repository, service, API, and tests belong to the same user-facing capability.
+
+## Step 4.1a: Add Study Comments To Records Files
+
+This step adds more comments inside the records feature files. The goal is not to change behavior. The goal is to make the code easier to study file by file.
+
+### Inspect The Current State
+
+```bash
+git status --short
+find backend/src/main/java/com/example/governance/records backend/src/test/java/com/example/governance/records -type f
+sed -n '1,260p' backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java
+tail -n 260 docs/command-log.md
+```
+
+Why:
+
+- Confirms the working tree is clean before the comment-only edit.
+- Lists the records files that need comments.
+- Reads the shared exception handler because it is part of records API error behavior.
+- Checks where to append the new command-log section.
+
+Result:
+
+- Git started clean.
+- Found the records production files, records test files, and shared exception handler to comment.
+
+Interview language:
+
+> I checked the working tree and read the files first so this documentation pass stayed scoped to the records feature.
+
+### Read The Files Before Editing
+
+```bash
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecord.java
+sed -n '1,240p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+sed -n '1,220p' backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java
+sed -n '1,180p' backend/src/main/java/com/example/governance/records/CreateRecordRequest.java
+sed -n '1,180p' backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java
+sed -n '1,120p' backend/src/main/java/com/example/governance/records/RecordStatus.java
+sed -n '1,120p' backend/src/main/java/com/example/governance/records/DuplicateRecordException.java
+sed -n '1,120p' backend/src/main/java/com/example/governance/records/RetentionPolicyNotFoundException.java
+sed -n '1,340p' backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java
+sed -n '1,360p' backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java
+sed -n '1,300p' backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java
+```
+
+Why:
+
+- Reads each file before editing so comments explain the real code.
+- Helps place comments near the blocks they explain.
+
+Result:
+
+- Identified the main comment targets: JPA mapping, service rules, DTO boundary, controller routes, exception handling, and test structure.
+
+Interview language:
+
+> I reviewed the source before editing so the comments explain intent, not just repeat syntax.
+
+### Add Comments Inside Source Files
+
+Files updated:
+
+- `backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java`
+- `backend/src/main/java/com/example/governance/records/CreateRecordRequest.java`
+- `backend/src/main/java/com/example/governance/records/DuplicateRecordException.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecord.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordController.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordService.java`
+- `backend/src/main/java/com/example/governance/records/RecordStatus.java`
+- `backend/src/main/java/com/example/governance/records/RetentionPolicyNotFoundException.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java`
+
+What the comments explain:
+
+- Which layer each file belongs to.
+- Why controllers should stay thin.
+- Why business rules live in services.
+- Why repositories are database access interfaces.
+- Why DTOs protect the API boundary.
+- Why JPA entity mappings must match Flyway SQL.
+- Why tests use mocks or real PostgreSQL depending on the test type.
+- Which details are important for interviews, marked with `IMPORTANT`.
+
+Interview language:
+
+> I added comments that explain architecture boundaries: entity, repository, service, DTO, controller, exception handler, unit test, and integration test.
+
+### Read Back And Test The Comment Pass
+
+```bash
+git diff --check
+git status --short
+git diff --stat
+sed -n '1,300p' backend/src/main/java/com/example/governance/records/GovernanceRecord.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+sed -n '1,360p' backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java
+sed -n '1,380p' backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java
+cd backend
+./mvnw test
+```
+
+Why:
+
+- `git diff --check` confirms no whitespace mistakes.
+- `git status --short` confirms only intended files changed.
+- `git diff --stat` confirms this is a comment-sized change.
+- `sed` reads the most important files back after editing.
+- `./mvnw test` compiles production and test code, then runs the fast test suite.
+
+Result:
+
+- Whitespace check passed.
+- 13 files changed with comment additions only.
+- Maven build succeeded.
+- Tests run: 20.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> Even though I only changed comments, I still compiled and ran the fast tests to prove the project stayed healthy.
+
+### Final Checks And Commit
+
+```bash
+git diff --check
+git status --short
+git diff --stat
+docker compose ps
+git add backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java backend/src/main/java/com/example/governance/records/CreateRecordRequest.java backend/src/main/java/com/example/governance/records/DuplicateRecordException.java backend/src/main/java/com/example/governance/records/GovernanceRecord.java backend/src/main/java/com/example/governance/records/GovernanceRecordController.java backend/src/main/java/com/example/governance/records/GovernanceRecordRepository.java backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java backend/src/main/java/com/example/governance/records/GovernanceRecordService.java backend/src/main/java/com/example/governance/records/RecordStatus.java backend/src/main/java/com/example/governance/records/RetentionPolicyNotFoundException.java backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java backend/src/test/java/com/example/governance/records/GovernanceRecordRepositoryIT.java backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git diff --cached --stat
+git status --short
+git add docs/command-log.md
+git commit -m "docs: add records code study comments"
+```
+
+Why:
+
+- Confirms the final diff is clean before staging.
+- Confirms Docker Compose is not running.
+- Stages only the comment and command-log files.
+- Reviews staged files before committing.
+- Creates a dedicated checkpoint for the study comments.
+
+Result:
+
+- Whitespace check passed.
+- Docker Compose showed no running services.
+- Diff summary showed 14 changed files.
+- Staged files: 14.
+- Staged whitespace check passed.
+
+Interview language:
+
+> I kept the comment pass as a separate commit so the learning notes are easy to review apart from behavior changes.
