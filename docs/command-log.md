@@ -5521,3 +5521,263 @@ Result:
 Interview language:
 
 > I committed the manual verification notes separately because this phase changed documentation, not application behavior.
+
+## Step 4.3: Add Records Pagination
+
+This step changes `GET /api/v1/records` from returning one plain JSON array to returning one page of records plus pagination metadata.
+
+### Official References Used
+
+- Spring Data JPA paging and sorting: https://docs.spring.io/spring-data/jpa/reference/repositories/query-methods-details.html
+- Spring Data JPA sorting with `PageRequest` and `Sort`: https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html
+- Spring MVC `@RequestParam`: https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-methods/requestparam.html
+
+### Inspect The Current Records API
+
+```bash
+git status --short
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordService.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordController.java
+sed -n '1,260p' backend/src/main/java/com/example/governance/records/GovernanceRecordResponse.java
+sed -n '1,380p' backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java
+sed -n '1,360p' backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java
+sed -n '1,260p' backend/pom.xml
+sed -n '1,260p' backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java
+```
+
+Why:
+
+- Confirms the working tree is clean before code changes.
+- Reads the current list endpoint and tests before changing the API response shape.
+- Confirms Spring Data JPA is already available through Maven.
+- Reads the shared exception handler because invalid pagination should return structured error JSON.
+
+Result:
+
+- The previous `GET /api/v1/records` returned a plain list.
+- The service previously called `repository.findAll(Sort.by("externalId").ascending())`, which loads all rows.
+
+Interview language:
+
+> I inspected the existing list endpoint before changing it because pagination changes the API contract.
+
+### Add Pagination Code
+
+Files added:
+
+- `backend/src/main/java/com/example/governance/api/PageResponse.java`
+- `backend/src/main/java/com/example/governance/records/InvalidRecordPageRequestException.java`
+
+Files updated:
+
+- `backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordController.java`
+- `backend/src/main/java/com/example/governance/records/GovernanceRecordService.java`
+
+New response shape:
+
+```json
+{
+  "content": [],
+  "page": 0,
+  "size": 20,
+  "totalElements": 0,
+  "totalPages": 0,
+  "first": true,
+  "last": true
+}
+```
+
+Important code ideas:
+
+```java
+@RequestParam(defaultValue = "0") int page
+@RequestParam(defaultValue = "20") int size
+PageRequest.of(page, size, Sort.by("externalId").ascending())
+repository.findAll(pageRequest)
+PageResponse.from(records)
+```
+
+Why:
+
+- `page` tells the API which chunk of records the client wants.
+- `size` tells the API how many records to return in that chunk.
+- `PageRequest` sends pagination and sorting instructions to Spring Data.
+- `repository.findAll(pageRequest)` lets the database return one page instead of every row.
+- `PageResponse` gives clients a stable JSON shape that the application owns.
+- `InvalidRecordPageRequestException` turns invalid pagination into `400 Bad Request`.
+
+Rules added:
+
+- Page number must be `0` or greater.
+- Page size must be between `1` and `100`.
+- Records are still sorted by `externalId` ascending.
+
+Interview language:
+
+> I added pagination so the API can handle large record sets without loading and returning every row at once.
+
+### Update Tests
+
+Files updated:
+
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java`
+- `backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java`
+
+Controller tests now verify:
+
+- Default pagination: `GET /api/v1/records` uses `page=0` and `size=20`.
+- Custom pagination: `GET /api/v1/records?page=1&size=1`.
+- Response JSON includes `content`, `page`, `size`, `totalElements`, `totalPages`, `first`, and `last`.
+- Invalid page number returns structured `400 Bad Request`.
+
+Service tests now verify:
+
+- The service builds `PageRequest.of(page, size, Sort.by("externalId").ascending())`.
+- The repository receives the expected page request.
+- Negative page numbers are rejected.
+- Page size `0` is rejected.
+- Page size above `100` is rejected.
+
+Interview language:
+
+> I updated both service tests and controller tests because pagination affects business query behavior and the HTTP response contract.
+
+### Run Focused Records Tests
+
+```bash
+cd backend
+./mvnw -Dtest=GovernanceRecordServiceTests,GovernanceRecordControllerTests test
+```
+
+Why:
+
+- Runs only the tests affected by pagination.
+- Gives fast feedback before running the larger suite.
+
+Result:
+
+- Build succeeded.
+- Tests run: 15.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I first ran focused tests for the changed records API so pagination failures would be easy to diagnose.
+
+### Run Fast Backend Tests
+
+```bash
+cd backend
+./mvnw test
+```
+
+Why:
+
+- Runs every fast `*Tests` class.
+- Confirms the shared API response changes did not break other fast tests.
+
+Result:
+
+- Build succeeded.
+- Tests run: 25.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I ran the fast suite after the focused tests to catch regressions outside the records feature.
+
+### Run Full Verification With PostgreSQL
+
+```bash
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U governance -d governance
+docker compose ps
+cd backend
+./mvnw verify
+```
+
+Why:
+
+- Starts PostgreSQL for integration tests.
+- Confirms the database is accepting connections.
+- Runs fast tests with Surefire.
+- Runs integration tests with Failsafe.
+
+Result:
+
+- PostgreSQL started successfully.
+- `pg_isready` returned `accepting connections`.
+- Surefire ran 25 fast tests.
+- Failsafe ran 10 integration tests.
+- Build succeeded.
+- Failures: 0.
+- Errors: 0.
+
+Interview language:
+
+> I ran full verification because pagination changes the API layer, and I still want the database-backed tests to pass before committing.
+
+### Verify Database Cleanup
+
+```bash
+docker compose exec -T postgres psql -U governance -d governance -c "select 'records' as table_name, count(*) as row_count from records union all select 'retention_policies', count(*) from retention_policies order by table_name;"
+docker compose exec -T postgres psql -U governance -d governance -c "select installed_rank, version, description, success from flyway_schema_history order by installed_rank;"
+docker compose ps
+docker compose down
+```
+
+Why:
+
+- Confirms integration tests left no business rows behind.
+- Confirms Flyway migration history is still valid.
+- Stops local infrastructure after verification.
+
+Result:
+
+- `records` row count: `0`.
+- `retention_policies` row count: `0`.
+- Flyway version `1`, description `create records schema`, success `true`.
+- PostgreSQL stopped cleanly.
+
+Interview language:
+
+> I checked database cleanup after integration tests so the test environment remains repeatable.
+
+### Final Checks And Commit
+
+```bash
+git diff --check
+docker compose ps
+git status --short
+git diff --stat
+git add backend/src/main/java/com/example/governance/api/ApiExceptionHandler.java backend/src/main/java/com/example/governance/api/PageResponse.java backend/src/main/java/com/example/governance/records/GovernanceRecordController.java backend/src/main/java/com/example/governance/records/GovernanceRecordService.java backend/src/main/java/com/example/governance/records/InvalidRecordPageRequestException.java backend/src/test/java/com/example/governance/records/GovernanceRecordControllerTests.java backend/src/test/java/com/example/governance/records/GovernanceRecordServiceTests.java docs/command-log.md
+git diff --cached --name-only
+git diff --cached --check
+git diff --cached --stat
+git status --short
+git add docs/command-log.md
+git commit -m "feat: add records pagination"
+```
+
+Why:
+
+- Confirms formatting is clean.
+- Confirms Docker Compose is stopped.
+- Stages only pagination files and the command log.
+- Reviews staged files before committing.
+- Creates a focused checkpoint for records pagination.
+
+Result:
+
+- Whitespace check passed.
+- Docker Compose showed no running services.
+- Git showed the expected pagination files.
+- Staged files: 8.
+- Staged whitespace check passed.
+
+Interview language:
+
+> I committed pagination separately so the API contract change is easy to review and explain.

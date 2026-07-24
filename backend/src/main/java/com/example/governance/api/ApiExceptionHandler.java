@@ -2,6 +2,7 @@ package com.example.governance.api;
 
 import com.example.governance.retention.DuplicateRetentionPolicyException;
 import com.example.governance.records.DuplicateRecordException;
+import com.example.governance.records.InvalidRecordPageRequestException;
 import com.example.governance.records.RetentionPolicyNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -64,6 +65,22 @@ public class ApiExceptionHandler {
 		);
 
 		return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+	}
+
+	// Request rule failure: page or size query parameter is outside the allowed range.
+	@ExceptionHandler(InvalidRecordPageRequestException.class)
+	public ResponseEntity<ApiErrorResponse> handleInvalidRecordPageRequest(
+			InvalidRecordPageRequestException exception,
+			HttpServletRequest request
+	) {
+		// Pagination mistakes are client request problems, so they return 400 Bad Request.
+		ApiErrorResponse response = ApiErrorResponse.of(
+				HttpStatus.BAD_REQUEST,
+				exception.getMessage(),
+				request.getRequestURI()
+		);
+
+		return ResponseEntity.badRequest().body(response);
 	}
 
 	// Bean Validation failure: request JSON did not satisfy annotations such as @NotBlank.

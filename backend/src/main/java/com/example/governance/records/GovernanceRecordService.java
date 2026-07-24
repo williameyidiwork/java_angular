@@ -2,16 +2,19 @@ package com.example.governance.records;
 
 import com.example.governance.retention.RetentionPolicy;
 import com.example.governance.retention.RetentionPolicyRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.util.UUID;
 
 // Service layer: owns business rules for records.
 // IMPORTANT: Controllers call this class; repositories should not contain business decisions.
 @Service
 public class GovernanceRecordService {
+
+	private static final int MAX_PAGE_SIZE = 100;
 
 	// Repository for the records table.
 	private final GovernanceRecordRepository repository;
@@ -42,9 +45,14 @@ public class GovernanceRecordService {
 		return repository.save(new GovernanceRecord(externalId, name, RecordStatus.ACTIVE, retentionPolicy));
 	}
 
-	public List<GovernanceRecord> listRecords() {
+	public Page<GovernanceRecord> listRecords(int page, int size) {
+		validatePageRequest(page, size);
+
 		// Stable ordering makes API responses easier to test and easier for clients to read.
-		return repository.findAll(Sort.by("externalId").ascending());
+		PageRequest pageRequest = PageRequest.of(page, size, Sort.by("externalId").ascending());
+
+		// IMPORTANT: findAll(PageRequest) lets the database return only one page instead of every row.
+		return repository.findAll(pageRequest);
 	}
 
 	private RetentionPolicy findRetentionPolicy(UUID retentionPolicyId) {
@@ -56,5 +64,15 @@ public class GovernanceRecordService {
 		// IMPORTANT: Do not save a record that points to a retention policy that does not exist.
 		return retentionPolicyRepository.findById(retentionPolicyId)
 				.orElseThrow(() -> new RetentionPolicyNotFoundException(retentionPolicyId));
+	}
+
+	private void validatePageRequest(int page, int size) {
+		if (page < 0) {
+			throw new InvalidRecordPageRequestException("Page index must be zero or greater.");
+		}
+
+		if (size < 1 || size > MAX_PAGE_SIZE) {
+			throw new InvalidRecordPageRequestException("Page size must be between 1 and " + MAX_PAGE_SIZE + ".");
+		}
 	}
 }

@@ -7,6 +7,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 
 import java.util.List;
@@ -118,20 +121,59 @@ class GovernanceRecordServiceTests {
 	}
 
 	@Test
-	void listsRecordsByExternalId() {
-		// Arrange: expected records and expected sort object.
+	void listsPagedRecordsByExternalId() {
+		// Arrange: expected records and expected page request.
 		List<GovernanceRecord> records = List.of(
 				new GovernanceRecord("REC-100", "Finance", RecordStatus.ACTIVE, null),
 				new GovernanceRecord("REC-200", "Legal", RecordStatus.ACTIVE, null)
 		);
-		Sort sortByExternalId = Sort.by("externalId").ascending();
-		when(repository.findAll(sortByExternalId)).thenReturn(records);
+		PageRequest pageRequest = PageRequest.of(0, 2, Sort.by("externalId").ascending());
+		when(repository.findAll(pageRequest)).thenReturn(new PageImpl<>(records, pageRequest, 5));
 
 		// Act: call the real service list method.
-		List<GovernanceRecord> result = service.listRecords();
+		Page<GovernanceRecord> result = service.listRecords(0, 2);
 
 		// Assert: result came from repository using the expected stable sort.
-		assertEquals(records, result);
-		verify(repository).findAll(sortByExternalId);
+		assertEquals(records, result.getContent());
+		assertEquals(0, result.getNumber());
+		assertEquals(2, result.getSize());
+		assertEquals(5, result.getTotalElements());
+		verify(repository).findAll(pageRequest);
+	}
+
+	@Test
+	void rejectsNegativePageNumber() {
+		// Act and assert: page numbers are zero-based, so negative numbers are invalid.
+		InvalidRecordPageRequestException exception = assertThrows(
+				InvalidRecordPageRequestException.class,
+				() -> service.listRecords(-1, 20)
+		);
+
+		assertEquals("Page index must be zero or greater.", exception.getMessage());
+		verify(repository, never()).findAll(any(PageRequest.class));
+	}
+
+	@Test
+	void rejectsPageSizeBelowOne() {
+		// Act and assert: size must be at least 1 because a page with 0 rows is not useful.
+		InvalidRecordPageRequestException exception = assertThrows(
+				InvalidRecordPageRequestException.class,
+				() -> service.listRecords(0, 0)
+		);
+
+		assertEquals("Page size must be between 1 and 100.", exception.getMessage());
+		verify(repository, never()).findAll(any(PageRequest.class));
+	}
+
+	@Test
+	void rejectsPageSizeAboveMaximum() {
+		// Act and assert: cap page size so one request cannot ask for too many rows.
+		InvalidRecordPageRequestException exception = assertThrows(
+				InvalidRecordPageRequestException.class,
+				() -> service.listRecords(0, 101)
+		);
+
+		assertEquals("Page size must be between 1 and 100.", exception.getMessage());
+		verify(repository, never()).findAll(any(PageRequest.class));
 	}
 }

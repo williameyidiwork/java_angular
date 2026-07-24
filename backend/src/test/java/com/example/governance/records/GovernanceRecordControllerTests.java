@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -60,23 +63,72 @@ class GovernanceRecordControllerTests {
 	}
 
 	@Test
-	void listRecordsReturnsRecordsFromService() throws Exception {
+	void listRecordsReturnsFirstPageFromService() throws Exception {
 		// Arrange: the fake service returns two records.
-		when(service.listRecords()).thenReturn(List.of(
+		PageRequest pageRequest = PageRequest.of(0, 20, Sort.by("externalId").ascending());
+		when(service.listRecords(0, 20)).thenReturn(new PageImpl<>(List.of(
 				new GovernanceRecord("REC-100", "Finance Report", RecordStatus.ACTIVE, null),
 				new GovernanceRecord("REC-200", "Legal Contract", RecordStatus.ACTIVE, null)
-		));
+		), pageRequest, 2));
 
-		// Act and assert: GET returns a JSON array in the same order as the service result.
+		// Act and assert: GET returns page metadata plus records in content.
 		mockMvc.perform(get("/api/v1/records"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$[0].externalId").value("REC-100"))
-				.andExpect(jsonPath("$[0].status").value("ACTIVE"))
-				.andExpect(jsonPath("$[1].externalId").value("REC-200"))
-				.andExpect(jsonPath("$[1].name").value("Legal Contract"));
+				.andExpect(jsonPath("$.content[0].externalId").value("REC-100"))
+				.andExpect(jsonPath("$.content[0].status").value("ACTIVE"))
+				.andExpect(jsonPath("$.content[1].externalId").value("REC-200"))
+				.andExpect(jsonPath("$.content[1].name").value("Legal Contract"))
+				.andExpect(jsonPath("$.page").value(0))
+				.andExpect(jsonPath("$.size").value(20))
+				.andExpect(jsonPath("$.totalElements").value(2))
+				.andExpect(jsonPath("$.totalPages").value(1))
+				.andExpect(jsonPath("$.first").value(true))
+				.andExpect(jsonPath("$.last").value(true));
 
 		// Assert: controller asked the service for the list.
-		verify(service).listRecords();
+		verify(service).listRecords(0, 20);
+	}
+
+	@Test
+	void listRecordsUsesRequestedPageAndSize() throws Exception {
+		// Arrange: page=1 and size=1 means the client wants the second page with one item.
+		PageRequest pageRequest = PageRequest.of(1, 1, Sort.by("externalId").ascending());
+		when(service.listRecords(1, 1)).thenReturn(new PageImpl<>(List.of(
+				new GovernanceRecord("REC-200", "Legal Contract", RecordStatus.ACTIVE, null)
+		), pageRequest, 2));
+
+		// Act and assert: query parameters are passed to the service and returned in the page metadata.
+		mockMvc.perform(get("/api/v1/records")
+						.param("page", "1")
+						.param("size", "1"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.content[0].externalId").value("REC-200"))
+				.andExpect(jsonPath("$.page").value(1))
+				.andExpect(jsonPath("$.size").value(1))
+				.andExpect(jsonPath("$.totalElements").value(2))
+				.andExpect(jsonPath("$.totalPages").value(2))
+				.andExpect(jsonPath("$.first").value(false))
+				.andExpect(jsonPath("$.last").value(true));
+
+		verify(service).listRecords(1, 1);
+	}
+
+	@Test
+	void listRecordsReturnsBadRequestForInvalidPagination() throws Exception {
+		// Arrange: the fake service applies the same pagination rule as the real service.
+		when(service.listRecords(-1, 20))
+				.thenThrow(new InvalidRecordPageRequestException("Page index must be zero or greater."));
+
+		// Act and assert: invalid pagination becomes structured 400 JSON.
+		mockMvc.perform(get("/api/v1/records")
+						.param("page", "-1"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.message").value("Page index must be zero or greater."))
+				.andExpect(jsonPath("$.path").value("/api/v1/records"));
+
+		verify(service).listRecords(-1, 20);
 	}
 
 	@Test

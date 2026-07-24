@@ -1,15 +1,16 @@
 package com.example.governance.records;
 
+import com.example.governance.api.PageResponse;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 // REST controller: turns HTTP requests into service calls.
 // IMPORTANT: This class should stay thin; business rules belong in GovernanceRecordService.
@@ -43,12 +44,19 @@ public class GovernanceRecordController {
 	}
 
 	// Handles GET /api/v1/records.
+	// Example: GET /api/v1/records?page=0&size=20
 	@GetMapping
-	public List<GovernanceRecordResponse> listRecords() {
-		// Convert every entity from the service into the API response shape.
-		return service.listRecords()
-				.stream()
-				.map(GovernanceRecordResponse::from)
-				.toList();
+	public PageResponse<GovernanceRecordResponse> listRecords(
+			// page is zero-based: page=0 means the first page.
+			@RequestParam(defaultValue = "0") int page,
+			// size controls the maximum number of rows returned in one response.
+			@RequestParam(defaultValue = "20") int size
+	) {
+		// Ask the service for one page, then convert each entity into response JSON.
+		Page<GovernanceRecordResponse> records = service.listRecords(page, size)
+				.map(GovernanceRecordResponse::from);
+
+		// Wrap the page metadata in a stable API response shape.
+		return PageResponse.from(records);
 	}
 }
